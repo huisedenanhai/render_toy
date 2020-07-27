@@ -1,6 +1,9 @@
 #include "exceptions.h"
 #include "pipeline.h"
+#include "vec_math.h"
 #include <cassert>
+#include <chrono>
+#include <ctime>
 #include <cuda_runtime.h>
 #include <fstream>
 #include <iostream>
@@ -269,9 +272,9 @@ int main(int argc, const char **argv) {
       auto &data = hitRecords[i].data;
       const auto &mat = materials[i];
       data.baseColor =
-          make_float3(mat.ambient[0], mat.ambient[1], mat.ambient[2]);
+          make_float3(mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
       data.emission =
-          make_float3(mat.emission[0], mat.emission[1], mat.emission[2]);
+          make_float3(mat.emission[0], mat.emission[1], mat.emission[2]) * Pi;
       printf("mat %s {\n", mat.name.c_str());
       printf("  color = (%f, %f, %f)\n",
              data.baseColor.x,
@@ -548,57 +551,92 @@ int main(int argc, const char **argv) {
   unsigned int frameWidth = 800, frameHeight = 800;
   unsigned int tileWidth = 256, tileHeight = 256;
   float frameResolution = 1000;
-  toy::RectInt frameCrop = toy::make_rect_int(0, 0, frameWidth, frameHeight);
   auto outputBufferSize = frameWidth * frameHeight * sizeof(float3);
-  // prepare for launch
+  // launch
   {
     using namespace toy;
     LaunchParams launchParams{};
-    auto &camera = launchParams.camera;
-    camera.position = make_float3(0, 1.0f, 5.0f);
-    camera.right = make_float3(1.0f, 0.0f, 0.0f);
-    camera.up = make_float3(0.0f, 1.0f, 0.0f);
-    camera.back = make_float3(0.0f, 0.0f, 1.0f);
-    auto canvasWidth = frameWidth / frameResolution;
-    auto canvasHeight = frameHeight / frameResolution;
-    camera.canvas = make_rect(
-        -canvasWidth / 2.0f, -canvasHeight / 2.0f, canvasWidth, canvasHeight);
+    // init common launchParam values
+    {
+      auto &camera = launchParams.camera;
+      camera.position = make_float3(0, 1.0f, 5.0f);
+      camera.right = make_float3(1.0f, 0.0f, 0.0f);
+      camera.up = make_float3(0.0f, 1.0f, 0.0f);
+      camera.back = make_float3(0.0f, 0.0f, 1.0f);
+      auto canvasWidth = frameWidth / frameResolution;
+      auto canvasHeight = frameHeight / frameResolution;
+      camera.canvas = make_rect(
+          -canvasWidth / 2.0f, -canvasHeight / 2.0f, canvasWidth, canvasHeight);
 
-    TOY_CUDA_CHECK_OR_THROW(
-        cudaMalloc(&state.outputFrameBuffer.ptr, outputBufferSize), );
-    auto &frame = launchParams.outputFrame;
-    frame.width = frameWidth;
-    frame.height = frameHeight;
-    frame.buffer = (float3 *)state.outputFrameBuffer.ptr;
-    frame.tile = frameCrop;
+      TOY_CUDA_CHECK_OR_THROW(
+          cudaMalloc(&state.outputFrameBuffer.ptr, outputBufferSize), );
+      auto &frame = launchParams.outputFrame;
+      frame.width = frameWidth;
+      frame.height = frameHeight;
+      frame.buffer = (float3 *)state.outputFrameBuffer.ptr;
 
-    auto &scene = launchParams.scene;
-    scene.gas = state.gas;
-    scene.epsilon = 1e-4;
-    scene.extent = 10.0f;
+      auto &scene = launchParams.scene;
+      scene.gas = state.gas;
+      scene.epsilon = 1e-5;
+      scene.extent = 10.0f;
 
-    launchParams.spp = 100;
-    launchParams.maxDepth = 3;
+      launchParams.spp = 10000;
+      launchParams.maxDepth = 15;
+    }
 
-    TOY_CUDA_CHECK_OR_THROW(
-        cudaMalloc(&state.launchParams.ptr, sizeof(launchParams)), );
-    TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(state.launchParams.ptr,
-                                       &launchParams,
-                                       sizeof(launchParams),
-                                       cudaMemcpyHostToDevice), );
-  }
-  // launch!
-  {
-    // launch size should match exactly with cropped size of the ouput frame
-    TOY_OPTIX_CHECK_OR_THROW(optixLaunch(state.pipeline,
-                                         0,
-                                         (CUdeviceptr)state.launchParams.ptr,
-                                         sizeof(toy::LaunchParams),
-                                         &state.sbt,
-                                         frameCrop.width,
-                                         frameCrop.height,
-                                         1), );
-    TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
+    auto startTime = std::chrono::system_clock::now();
+
+    {
+      auto t = std::chrono::system_clock::to_time_t(startTime);
+      std::cout << "render start at " << std::ctime(&t) << std::flush;
+    }
+    {
+      TOY_CUDA_CHECK_OR_THROW(
+          cudaMalloc(&state.launchParams.ptr, sizeof(launchParams)), );
+      // tile frame for launch
+      for (int x = 0; x < frameWidth; x += tileWidth) {
+        for (int y = 0; y < frameHeight; y += tileHeight) {
+          // init tile
+          int launchWidth = min(tileWidth, frameWidth - x);
+          int launchHeight = min(tileHeight, frameHeight - y);
+          auto &frame = launchParams.outputFrame;
+          frame.tile = make_rect_int(x, y, launchWidth, launchHeight);
+
+          TOY_CUDA_CHECK_OR_THROW(cudaMemcpyAsync(state.launchParams.ptr,
+                                                  &launchParams,
+                                                  sizeof(launchParams),
+                                                  cudaMemcpyHostToDevice,
+                                                  0), );
+
+          // launch size should match exactly with cropped size of the ouput
+          // frame
+          TOY_OPTIX_CHECK_OR_THROW(
+              optixLaunch(state.pipeline,
+                          0,
+                          (CUdeviceptr)state.launchParams.ptr,
+                          sizeof(toy::LaunchParams),
+                          &state.sbt,
+                          launchWidth,
+                          launchHeight,
+                          1), );
+        }
+      }
+      TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
+
+      auto endTime = std::chrono::system_clock::now();
+      {
+        using namespace std::chrono;
+        auto t = system_clock::to_time_t(endTime);
+        // TODO more pretty output
+        auto s = duration_cast<seconds>(endTime - startTime).count();
+        auto m = floor(s / 60.0);
+        s -= m * 60.0f;
+        auto h = floor(m / 60.0);
+        m -= h * 60.0f;
+        std::cout << "render finished at " << std::ctime(&t) << std::flush;
+        std::cout << "duration " << h << ":" << m << ":" << s << std::endl;
+      }
+    }
   }
   // write image to output
   {

@@ -1,4 +1,5 @@
 #include "pipeline.h"
+#include "random.h"
 #include "vec_math.h"
 #include <optix.h>
 
@@ -6,19 +7,6 @@ using namespace toy;
 
 extern "C" {
 __constant__ LaunchParams g_LaunchParams;
-}
-
-// Generate random unsigned int in [0, 2^24)
-__device__ __forceinline__ unsigned int lcg(unsigned int &prev) {
-  constexpr int LCG_A = 1664525u;
-  constexpr int LCG_C = 1013904223u;
-  prev = (LCG_A * prev + LCG_C);
-  return prev & 0x00FFFFFF;
-}
-
-// rand float in range [0, 1)
-__device__ __forceinline__ float rnd(unsigned int &randState) {
-  return (float)lcg(randState) / (float)0x01000000;
 }
 
 __device__ __forceinline__ float2 rect_lerp(const Rect &rect,
@@ -35,8 +23,12 @@ __device__ __forceinline__ uint2 current_pixel() {
   return pixel;
 }
 
+__device__ __forceinline__ unsigned int pixel_index(const uint2 &pixel) {
+  return pixel.y * g_LaunchParams.outputFrame.width + pixel.x;
+}
+
 __device__ __forceinline__ float3 &pixel_value(const uint2 &pixel) {
-  auto index = pixel.y * g_LaunchParams.outputFrame.width + pixel.x;
+  auto index = pixel_index(pixel);
   return g_LaunchParams.outputFrame.buffer[index];
 }
 
@@ -159,7 +151,8 @@ cosine_sample_hemisphere(unsigned int &randState, float3 &d) {
 
 extern "C" __device__ void __raygen__entry() {
   auto pixelIndex = current_pixel();
-  unsigned int randState = pixelIndex.x * 114514 + pixelIndex.y;
+
+  unsigned int randState = tea<4>(pixel_index(pixelIndex), 114514);
 
   const auto spp = g_LaunchParams.spp;
   auto maxDepth = g_LaunchParams.maxDepth;
@@ -198,6 +191,16 @@ extern "C" __device__ void __raygen__entry() {
         break;
       } else if (prd.hitType == HitType::Surface) {
         rayColor += factor * prd.mat.emission;
+        // Russian Roulette
+        // don't make the prob too small
+        auto continueRate = max(length(factor), 0.03f);
+        if (depth >= 3) {
+          if (rnd(randState) > continueRate) {
+            break;
+          } else {
+            factor /= continueRate;
+          }
+        }
         // calculate next ray
         float3 d;
         auto pdf = cosine_sample_hemisphere(randState, d);
