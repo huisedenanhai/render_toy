@@ -3,6 +3,7 @@
 #include "vec_math.h"
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <ctime>
 #include <cuda_runtime.h>
 #include <fstream>
@@ -552,13 +553,26 @@ int main(int argc, const char **argv) {
   unsigned int tileWidth = 64, tileHeight = 64;
   float frameResolution = 1000;
   auto outputBufferSize = frameWidth * frameHeight * sizeof(float3);
+  constexpr unsigned int numStreams = 8;
+
+  cudaStream_t streams[numStreams]{};
+  for (int i = 0; i < numStreams; i++) {
+    TOY_CUDA_CHECK_OR_THROW(cudaStreamCreate(&streams[i]), );
+  }
+
   // launch
   {
     using namespace toy;
-    LaunchParams launchParams{};
+
+    // alloc output frame buffer
+    TOY_CUDA_CHECK_OR_THROW(
+        cudaMalloc(&state.outputFrameBuffer.ptr, outputBufferSize), );
+
+    LaunchParams launchParams[numStreams]{};
     // init common launchParam values
-    {
-      auto &camera = launchParams.camera;
+    for (int i = 0; i < numStreams; i++) {
+      auto &param = launchParams[i];
+      auto &camera = param.camera;
       camera.position = make_float3(0, 1.0f, 5.0f);
       camera.right = make_float3(1.0f, 0.0f, 0.0f);
       camera.up = make_float3(0.0f, 1.0f, 0.0f);
@@ -568,20 +582,18 @@ int main(int argc, const char **argv) {
       camera.canvas = make_rect(
           -canvasWidth / 2.0f, -canvasHeight / 2.0f, canvasWidth, canvasHeight);
 
-      TOY_CUDA_CHECK_OR_THROW(
-          cudaMalloc(&state.outputFrameBuffer.ptr, outputBufferSize), );
-      auto &frame = launchParams.outputFrame;
+      auto &frame = param.outputFrame;
       frame.width = frameWidth;
       frame.height = frameHeight;
       frame.buffer = (float3 *)state.outputFrameBuffer.ptr;
 
-      auto &scene = launchParams.scene;
+      auto &scene = param.scene;
       scene.gas = state.gas;
       scene.epsilon = 1e-5;
       scene.extent = 10.0f;
 
-      launchParams.spp = 10000;
-      launchParams.maxDepth = 15;
+      param.spp = 100000;
+      param.maxDepth = 15;
     }
 
     auto startTime = std::chrono::system_clock::now();
@@ -591,37 +603,45 @@ int main(int argc, const char **argv) {
       std::cout << "render start at " << std::ctime(&t) << std::flush;
     }
     {
-      TOY_CUDA_CHECK_OR_THROW(
-          cudaMalloc(&state.launchParams.ptr, sizeof(launchParams)), );
+      TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&state.launchParams.ptr,
+                                         sizeof(LaunchParams) * numStreams), );
+      int streamIndex = 0;
       // tile frame for launch
       for (int x = 0; x < frameWidth; x += tileWidth) {
-        for (int y = 0; y < frameHeight; y += tileHeight) {
+        for (int y = 0; y < frameHeight;
+             y += tileHeight, streamIndex = (streamIndex + 1) % numStreams) {
+          auto stream = streams[streamIndex];
+          auto &param = launchParams[streamIndex];
+          auto paramPtrD = (void *)((char *)state.launchParams.ptr +
+                                    streamIndex * sizeof(LaunchParams));
           // init tile
           int launchWidth = min(tileWidth, frameWidth - x);
           int launchHeight = min(tileHeight, frameHeight - y);
-          auto &frame = launchParams.outputFrame;
+          auto &frame = param.outputFrame;
           frame.tile = make_rect_int(x, y, launchWidth, launchHeight);
 
-          TOY_CUDA_CHECK_OR_THROW(cudaMemcpyAsync(state.launchParams.ptr,
-                                                  &launchParams,
-                                                  sizeof(launchParams),
+          TOY_CUDA_CHECK_OR_THROW(cudaMemcpyAsync(paramPtrD,
+                                                  &param,
+                                                  sizeof(LaunchParams),
                                                   cudaMemcpyHostToDevice,
-                                                  0), );
+                                                  stream), );
 
           // launch size should match exactly with cropped size of the ouput
           // frame
-          TOY_OPTIX_CHECK_OR_THROW(
-              optixLaunch(state.pipeline,
-                          0,
-                          (CUdeviceptr)state.launchParams.ptr,
-                          sizeof(toy::LaunchParams),
-                          &state.sbt,
-                          launchWidth,
-                          launchHeight,
-                          1), );
+          TOY_OPTIX_CHECK_OR_THROW(optixLaunch(state.pipeline,
+                                               stream,
+                                               (CUdeviceptr)paramPtrD,
+                                               sizeof(toy::LaunchParams),
+                                               &state.sbt,
+                                               launchWidth,
+                                               launchHeight,
+                                               1), );
         }
       }
-      TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
+
+      for (int i = 0; i < numStreams; i++) {
+        TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(streams[i]), );
+      }
 
       auto endTime = std::chrono::system_clock::now();
       {
@@ -648,7 +668,6 @@ int main(int argc, const char **argv) {
                                        cudaMemcpyDeviceToHost), );
     auto resultAsBytes = std::make_unique<unsigned char[]>(elemCnt);
     auto convertPixel = [](float v) {
-      auto res = v * 255;
       if (v < 0) {
         v = 0;
       }
