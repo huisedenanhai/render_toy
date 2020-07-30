@@ -549,7 +549,7 @@ int main(int argc, const char **argv) {
     }
   }
   unsigned int frameWidth = 800, frameHeight = 800;
-  unsigned int tileWidth = 256, tileHeight = 256;
+  unsigned int tileWidth = 64, tileHeight = 64;
   float frameResolution = 1000;
   auto outputBufferSize = frameWidth * frameHeight * sizeof(float3);
   // launch
@@ -628,7 +628,7 @@ int main(int argc, const char **argv) {
         using namespace std::chrono;
         auto t = system_clock::to_time_t(endTime);
         // TODO more pretty output
-        auto s = duration_cast<seconds>(endTime - startTime).count();
+        auto s = duration<float>(endTime - startTime).count();
         auto m = floor(s / 60.0);
         s -= m * 60.0f;
         auto h = floor(m / 60.0);
