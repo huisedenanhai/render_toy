@@ -193,7 +193,7 @@ extern "C" __device__ void __raygen__entry() {
         rayColor += factor * prd.mat.emission;
         // Russian Roulette
         // don't make the prob too small
-        auto continueRate = max(length(factor), 0.03f);
+        auto continueRate = min(max(length(factor), 0.03f), 1.0f);
         if (depth >= 3) {
           if (rnd(randState) > continueRate) {
             break;
