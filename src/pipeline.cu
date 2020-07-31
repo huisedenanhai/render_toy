@@ -56,59 +56,28 @@ sample_camera_ray(unsigned int &randState, float3 &origin, float3 &direction) {
   return 1.0f; // w / pdf
 }
 
-struct MaterialInfo {
-  float3 baseColor;
-  float3 emission;
-};
-
-__device__ __forceinline__ void init_material_info(MaterialInfo &mat) {
-  mat.baseColor = make_float3(0, 0, 0);
-  mat.emission = make_float3(0, 0, 0);
-}
-
 struct TangentSpace {
   float3 origin;
-  float3 n;
   float3 dpdu;
   float3 dpdv;
+  float3 n;
 };
 
-__device__ __forceinline__ void init_tangent_space(TangentSpace &ts) {
-  ts.origin = make_float3(0, 0, 0);
-  ts.n = make_float3(0, 0, 0);
-  ts.dpdu = make_float3(0, 0, 0);
-  ts.dpdv = make_float3(0, 0, 0);
-}
-
-struct GeometryInfo {
-  unsigned int primId;
-  float3 vertices[3];
-  float2 uv;
-  TangentSpace ts;
+struct Ray {
+  float3 origin;
+  float min;
+  float3 direction;
+  float max;
 };
-
-__device__ __forceinline__ void init_geometry_info(GeometryInfo &geom) {
-  geom.primId = 0;
-  for (int i = 0; i < 3; i++) {
-    geom.vertices[i] = make_float3(0, 0, 0);
-  }
-  geom.uv = make_float2(0, 0);
-  init_tangent_space(geom.ts);
-}
-
-enum class HitType { Unknown, Surface, Miss };
 
 struct RayPayload {
-  HitType hitType;
-  MaterialInfo mat;
-  GeometryInfo geom;
+  bool finish;
+  Ray ray;
+  int length;
+  float3 weight;
+  float3 color;
+  unsigned int seed;
 };
-
-__device__ __forceinline__ void init_prd(RayPayload &prd) {
-  prd.hitType = HitType::Unknown;
-  init_material_info(prd.mat);
-  init_geometry_info(prd.geom);
-}
 
 __device__ __forceinline__ void
 unpack_ptr(void *ptr, unsigned int &p0, unsigned int &p1) {
@@ -151,76 +120,43 @@ cosine_sample_hemisphere(unsigned int &randState, float3 &d) {
 
 extern "C" __device__ void __raygen__entry() {
   auto pixelIndex = current_pixel();
+  RayPayload prd{};
+  prd.seed = tea<4>(pixel_index(pixelIndex), 114514);
 
-  unsigned int randState = tea<4>(pixel_index(pixelIndex), 114514);
+  unsigned int p0, p1;
+  unpack_ptr(&prd, p0, p1);
 
-  const auto spp = g_LaunchParams.spp;
-  auto maxDepth = g_LaunchParams.maxDepth;
-
-  float3 pixelColor = make_float3(0, 0, 0);
+  float3 pixelColor = make_float3(0.0f, 0.0f, 0.0f);
+  auto spp = g_LaunchParams.spp;
 
   for (int i = 0; i < spp; i++) {
-    float3 rayOrigin, rayDirection;
-    auto w = sample_camera_ray(randState, rayOrigin, rayDirection);
+    prd.finish = false;
+    prd.length = 0;
+    prd.weight = make_float3(1.0f, 1.0f, 1.0f);
+    prd.color = make_float3(0.0f, 0.0f, 0.0f);
 
-    float3 rayColor = make_float3(0, 0, 0);
-    float3 factor = make_float3(1.0f, 1.0f, 1.0f);
-
+    auto w = sample_camera_ray(prd.seed, prd.ray.origin, prd.ray.direction);
     const auto &scene = g_LaunchParams.scene;
+    prd.ray.min = scene.epsilon;
+    prd.ray.max = scene.extent;
 
-    for (int depth = 0; depth < maxDepth; depth++) {
-      RayPayload prd{};
-      init_prd(prd);
-      unsigned int p0, p1;
-      unpack_ptr(&prd, p0, p1);
+    while (!prd.finish) {
+      prd.length++;
       optixTrace(scene.gas,
-                 rayOrigin,
-                 rayDirection,
-                 scene.epsilon,          // tmin
-                 max(scene.extent, 1e4), // tmax
-                 0,                      // ray time
-                 255,                    // mask
+                 prd.ray.origin,
+                 prd.ray.direction,
+                 prd.ray.min, // tmin
+                 prd.ray.max, // tmax
+                 0,           // ray time
+                 255,         // mask
                  OPTIX_RAY_FLAG_NONE,
                  0, // sbt offset
                  1, // sbt stride
                  0, // miss index
                  p0,
                  p1);
-      if (prd.hitType == HitType::Miss) {
-        rayColor += factor * prd.mat.emission;
-        break;
-      } else if (prd.hitType == HitType::Surface) {
-        rayColor += factor * prd.mat.emission;
-        // Russian Roulette
-        // don't make the prob too small
-        auto continueRate = min(max(length(factor), 0.03f), 1.0f);
-        if (depth >= 3) {
-          if (rnd(randState) > continueRate) {
-            break;
-          } else {
-            factor /= continueRate;
-          }
-        }
-        // calculate next ray
-        float3 d;
-        auto pdf = cosine_sample_hemisphere(randState, d);
-        const auto &ts = prd.geom.ts;
-        float3 localX = normalize(ts.dpdu);
-        float3 localZ = faceforward(ts.n, -rayDirection, ts.n);
-        float3 localY = normalize(cross(ts.n, localX));
-        auto nextDir = normalize(localX * d.x + localY * d.y + localZ * d.z);
-        // init next ray
-        rayOrigin = ts.origin + localZ * scene.epsilon;
-        rayDirection = nextDir;
-        // attenuate factor, some terms are cancelled out as
-        // hemisphere are cosine sampled
-        factor *= prd.mat.baseColor;
-      } else {
-        // unknow hit type
-        optixThrowException(123);
-      }
     }
-    pixelColor += w * rayColor;
+    pixelColor += w * prd.color;
   }
   current_pixel_value() = pixelColor / (float)spp;
 }
@@ -229,8 +165,8 @@ extern "C" __device__ void __miss__entry() {
   auto data = (MissData *)optixGetSbtDataPointer();
   auto prd = get_prd();
 
-  prd->hitType = HitType::Miss;
-  prd->mat.baseColor = data->color;
+  prd->color += prd->weight * data->color;
+  prd->finish = true;
 }
 
 extern "C" __device__ void __exception__entry() {
@@ -240,28 +176,45 @@ extern "C" __device__ void __exception__entry() {
 
 extern "C" __device__ void __closesthit__entry() {
   auto prd = get_prd();
-  prd->hitType = HitType::Surface;
 
   // init geom
   auto data = (HitGroupData *)optixGetSbtDataPointer();
   auto primId = optixGetPrimitiveIndex();
   auto gas = optixGetGASTraversableHandle();
   auto uv = optixGetTriangleBarycentrics();
-  prd->geom.primId = primId;
-  prd->geom.uv = uv;
-  optixGetTriangleVertexData(gas, primId, 0, 0, prd->geom.vertices);
+  float3 v[3];
+  optixGetTriangleVertexData(gas, primId, 0, 0, v);
 
   // calculate tangent space
-  auto &ts = prd->geom.ts;
-  auto v = prd->geom.vertices;
+  TangentSpace ts;
   ts.origin = v[0] * (1 - uv.x - uv.y) + v[1] * uv.x + v[2] * uv.y;
   ts.dpdu = v[1] - v[0];
   ts.dpdv = v[2] - v[0];
   ts.n = normalize(cross(ts.dpdu, ts.dpdv));
 
-  // init material
-  prd->mat.baseColor = data->baseColor;
-  prd->mat.emission = data->emission;
+  prd->color += prd->weight * data->emission;
+  // Russian Roulette
+  // don't make the prob too small
+  auto continueRate = min(max(length(prd->weight), 0.03f), 1.0f);
+  bool rrFinish = prd->length >= 3 && rnd(prd->seed) > continueRate;
+  prd->finish = prd->length >= g_LaunchParams.maxPathLength || rrFinish;
+  prd->weight /= continueRate;
+  // calculate next ray
+  float3 d;
+  auto pdf = cosine_sample_hemisphere(prd->seed, d);
+  float3 localX = normalize(ts.dpdu);
+  float3 localZ = faceforward(ts.n, -prd->ray.direction, ts.n);
+  float3 localY = normalize(cross(ts.n, localX));
+  auto nextDir = normalize(localX * d.x + localY * d.y + localZ * d.z);
+  // init next ray
+  auto &scene = g_LaunchParams.scene;
+  prd->ray.origin = ts.origin + localZ * scene.epsilon;
+  prd->ray.direction = nextDir;
+  prd->ray.min = scene.epsilon;
+  prd->ray.max = scene.extent;
+  // attenuate factor, some terms are cancelled out as
+  // hemisphere are cosine sampled
+  prd->weight *= data->baseColor;
 }
 
 extern "C" __device__ void __anyhit__entry() {}

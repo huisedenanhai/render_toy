@@ -83,7 +83,7 @@ struct LaunchParams {
   Scene scene;
 
   int spp;
-  int maxDepth;
+  int maxPathLength;
 };
 
 struct RayGenData {};

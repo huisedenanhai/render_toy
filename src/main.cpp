@@ -593,7 +593,7 @@ int main(int argc, const char **argv) {
       scene.extent = 10.0f;
 
       param.spp = 100000;
-      param.maxDepth = 15;
+      param.maxPathLength = 15;
     }
 
     auto startTime = std::chrono::system_clock::now();
