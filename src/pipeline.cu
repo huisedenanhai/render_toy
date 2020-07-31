@@ -3,8 +3,6 @@
 #include "vec_math.h"
 #include <optix.h>
 
-using namespace toy;
-
 extern "C" {
 __constant__ LaunchParams g_LaunchParams;
 }

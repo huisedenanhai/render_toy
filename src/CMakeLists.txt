@@ -27,6 +27,8 @@ find_package(Boost 1.70.0 REQUIRED COMPONENTS filesystem)
 
 add_executable(toy_exe
   main.cpp
+  Context.h
+  Context.cpp
   exceptions.h
   )
 target_include_directories(toy_exe PRIVATE

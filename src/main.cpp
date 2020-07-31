@@ -1,3 +1,4 @@
+#include "Context.h"
 #include "exceptions.h"
 #include "pipeline.h"
 #include "vec_math.h"
@@ -8,69 +9,15 @@
 #include <cuda_runtime.h>
 #include <fstream>
 #include <iostream>
-#include <optix.h>
-#include <optix_function_table.h>
-#include <optix_function_table_definition.h>
-#include <optix_stubs.h>
 #include <stb/stb_image_write.h>
 #include <tinyobj/tiny_obj_loader.h>
 #include <unordered_map>
 #include <vector>
 
-struct CudaMemoryRAII {
-  void *ptr = nullptr;
-
-  void release() noexcept {
-    try {
-      TOY_CUDA_CHECK_OR_THROW(cudaFree(ptr), );
-    } catch (const toy::CudaException &e) {
-      std::cerr << "failed to release cuda memory: " << e.what() << std::endl;
-    }
-    ptr = nullptr;
-  }
-
-  CudaMemoryRAII(void *p = nullptr) : ptr(p) {}
-  CudaMemoryRAII(const CudaMemoryRAII &) = delete;
-  CudaMemoryRAII(CudaMemoryRAII &&from) noexcept
-      : ptr(std::exchange(from.ptr, nullptr)) {}
-
-  CudaMemoryRAII &operator=(const CudaMemoryRAII &) = delete;
-  CudaMemoryRAII &operator=(CudaMemoryRAII &&from) {
-    if (ptr == from.ptr) {
-      return *this;
-    }
-    release();
-    ptr = std::exchange(from.ptr, nullptr);
-    return *this;
-  }
-
-  ~CudaMemoryRAII() {
-    release();
-  }
-};
-
 template <typename T> struct alignas(OPTIX_SBT_RECORD_ALIGNMENT) Record {
   char header[OPTIX_SBT_RECORD_HEADER_SIZE];
   T data;
 };
-
-static void optix_log_callback(unsigned int level,
-                               const char *tag,
-                               const char *message,
-                               void *cbdata) {
-  if (level == 0) {
-    return;
-  }
-  if (level >= 4) {
-    printf("Optix Info [%s]: %s\n", tag, message);
-    return;
-  }
-  if (level >= 3) {
-    printf("Optix Warning [%s]: %s\n", tag, message);
-    return;
-  }
-  fprintf(stderr, "Optix Error [%s]: %s\n", tag, message);
-}
 
 struct OptixState {
   OptixDeviceContext context = 0;
@@ -112,42 +59,6 @@ struct OptixState {
   }
 };
 
-struct Config {
-  std::string ptxDir;
-};
-
-static Config g_Config;
-
-// convert path seperator to '/'
-static void convert_path_seperator(std::string &s) {
-  for (auto &c : s) {
-    if (c == '\\') {
-      c = '/';
-    }
-  }
-}
-
-// return index to seperator
-static int parent_dir_len(const char *dir) {
-  int len = strlen(dir);
-  int pLen = 0;
-  for (int i = len - 1; i >= 0; i--) {
-    if (dir[i] == '/' || dir[i] == '\\') {
-      pLen = i;
-      break;
-    }
-  }
-  return pLen;
-}
-
-static std::string parent_dir(const char *dir, bool withSeperator = false) {
-  auto pLen = parent_dir_len(dir);
-  if (withSeperator) {
-    pLen += 1;
-  }
-  return std::string(dir, dir + pLen);
-}
-
 static void configure_ptx_dir(const char *exeDir) {
   int pathLen = parent_dir_len(exeDir);
   char seperator = exeDir[pathLen];
@@ -156,37 +67,12 @@ static void configure_ptx_dir(const char *exeDir) {
     memcpy(buf.get(), exeDir, pathLen);
     buf[pathLen] = seperator;
     memcpy(buf.get() + pathLen + 1, "ptx", 4);
-    g_Config.ptxDir = buf.get();
+    Context::ptxDir = buf.get();
   }
 
-  convert_path_seperator(g_Config.ptxDir);
-  std::cout << "compiled ptx will be load from " << g_Config.ptxDir
+  convert_path_seperator(Context::ptxDir);
+  std::cout << "compiled ptx will be load from " << Context::ptxDir
             << std::endl;
-}
-
-static const std::string &get_ptx(const std::string &file) {
-  static std::unordered_map<std::string, std::string> s_PtxCache;
-
-  auto path = g_Config.ptxDir + "/" + file;
-  convert_path_seperator(path);
-
-  {
-    auto it = s_PtxCache.find(path);
-    if (it != s_PtxCache.end()) {
-      return it->second;
-    }
-  }
-  std::ifstream ptxFile(path);
-  if (!ptxFile.good()) {
-    throw "can not open file " + path;
-  }
-  auto result = s_PtxCache.emplace(
-      std::piecewise_construct,
-      std::forward_as_tuple(path),
-      std::forward_as_tuple(std::istreambuf_iterator<char>(ptxFile),
-                            std::istreambuf_iterator<char>()));
-  assert(result.second);
-  return result.first->second;
 }
 
 int main(int argc, const char **argv) {
@@ -262,8 +148,8 @@ int main(int argc, const char **argv) {
   // transform material data to target format
   // 0 if use default material
   int materialCnt = materials.size();
-  std::vector<Record<toy::HitGroupData>> hitRecords(
-      materialCnt == 0 ? 1 : materialCnt);
+  std::vector<Record<HitGroupData>> hitRecords(materialCnt == 0 ? 1
+                                                                : materialCnt);
   if (materialCnt == 0) {
     // default material
     hitRecords[0].data.baseColor = make_float3(0.5f, 0.5f, 0.5f);
@@ -309,17 +195,9 @@ int main(int argc, const char **argv) {
   }
 
   // init optix
-  TOY_CU_CHECK_OR_THROW(cuInit(0), );
-  TOY_OPTIX_CHECK_OR_THROW(optixInit(), );
   OptixState state;
-  {
-    OptixDeviceContextOptions options{};
-    options.logCallbackFunction = optix_log_callback;
-    options.logCallbackLevel = 4;
-    options.logCallbackData = nullptr;
-    TOY_OPTIX_CHECK_OR_THROW(
-        optixDeviceContextCreate(0, &options, &state.context), );
-  }
+  Context::init();
+  state.context = Context::context;
   // build gas
   CudaMemoryRAII accelOutputBuffer{};
   {
@@ -394,93 +272,24 @@ int main(int argc, const char **argv) {
     TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
   }
   // assemble pipeline
-  {
-    OptixPipelineCompileOptions pipelineCompileOptions{};
-    pipelineCompileOptions.usesMotionBlur = 0;
-    pipelineCompileOptions.traversableGraphFlags =
-        OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-    pipelineCompileOptions.numPayloadValues = 2;
-    pipelineCompileOptions.numAttributeValues = 2;
-    pipelineCompileOptions.exceptionFlags =
-        OPTIX_EXCEPTION_FLAG_DEBUG | OPTIX_EXCEPTION_FLAG_USER;
-    pipelineCompileOptions.pipelineLaunchParamsVariableName = "g_LaunchParams";
-
-    // load module
-    {
-      OptixModuleCompileOptions moduleOptions{};
-      // no explicit limit
-      moduleOptions.maxRegisterCount = 0;
-      // moduleOptions.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
-      // moduleOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
-      moduleOptions.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_3;
-      moduleOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
-
-      const auto &ptx = get_ptx("pipeline.ptx");
-      TOY_OPTIX_CHECK_OR_THROW(optixModuleCreateFromPTX(state.context,
-                                                        &moduleOptions,
-                                                        &pipelineCompileOptions,
-                                                        ptx.c_str(),
-                                                        ptx.size(),
-                                                        0,
-                                                        0,
-                                                        &state.module), );
-    }
-    // create program groups
-    {
-      OptixProgramGroupDesc desc[state.groupCnt];
-      auto &rayGenDesc = desc[state.rayGenGroupIndex];
-      rayGenDesc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
-      rayGenDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
-      rayGenDesc.raygen.module = state.module;
-      rayGenDesc.raygen.entryFunctionName = "__raygen__entry";
-      auto &missDesc = desc[state.missGroupIndex];
-      missDesc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
-      missDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
-      missDesc.miss.module = state.module;
-      missDesc.miss.entryFunctionName = "__miss__entry";
-      auto &exceptionDesc = desc[state.exceptionGroupIndex];
-      exceptionDesc.kind = OPTIX_PROGRAM_GROUP_KIND_EXCEPTION;
-      exceptionDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
-      exceptionDesc.exception.module = state.module;
-      exceptionDesc.exception.entryFunctionName = "__exception__entry";
-      auto &hitDesc = desc[state.hitGroupIndex];
-      hitDesc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-      hitDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
-      hitDesc.hitgroup.moduleCH = state.module;
-      hitDesc.hitgroup.entryFunctionNameCH = "__closesthit__entry";
-      hitDesc.hitgroup.moduleAH = state.module;
-      hitDesc.hitgroup.entryFunctionNameAH = "__anyhit__entry";
-      hitDesc.hitgroup.moduleIS = 0;
-      hitDesc.hitgroup.entryFunctionNameIS = 0;
-
-      OptixProgramGroupOptions options[state.groupCnt];
-      TOY_OPTIX_CHECK_OR_THROW(optixProgramGroupCreate(state.context,
-                                                       desc,
-                                                       state.groupCnt,
-                                                       options,
-                                                       0,
-                                                       0,
-                                                       state.groups), );
-    }
-    // link pipeline
-    {
-      OptixPipelineLinkOptions linkOptions;
-      linkOptions.maxTraceDepth = 2;
-      linkOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
-      linkOptions.overrideUsesMotionBlur = 0;
-      TOY_OPTIX_CHECK_OR_THROW(optixPipelineCreate(state.context,
-                                                   &pipelineCompileOptions,
-                                                   &linkOptions,
-                                                   state.groups,
-                                                   state.groupCnt,
-                                                   0,
-                                                   0,
-                                                   &state.pipeline), );
-    }
-  }
+  auto moduleName = "pipeline.ptx";
+  auto pipeline =
+      PipelineBuilder()
+          .set_launch_params("g_LaunchParams")
+          .add_raygen_group(moduleName, "__raygen__entry")
+          .add_miss_group(moduleName, "__miss__entry")
+          .add_exception_group(moduleName, "__exception__entry")
+          .add_hit_group(
+              moduleName, "__closesthit__entry", moduleName, "__anyhit__entry")
+          .build();
+  state.pipeline = pipeline.pipeline;
+  state.module = pipeline.modules[moduleName];
+  state.groups[state.rayGenGroupIndex] = pipeline.raygenGroups[0];
+  state.groups[state.missGroupIndex] = pipeline.missGroups[0];
+  state.groups[state.exceptionGroupIndex] = pipeline.exceptionGroups[0];
+  state.groups[state.hitGroupIndex] = pipeline.hitGroups[0];
   // set up sbt
   {
-    using namespace toy;
     {
       Record<RayGenData> raygenRecord;
       TOY_OPTIX_CHECK_OR_THROW(
@@ -562,8 +371,6 @@ int main(int argc, const char **argv) {
 
   // launch
   {
-    using namespace toy;
-
     // alloc output frame buffer
     TOY_CUDA_CHECK_OR_THROW(
         cudaMalloc(&state.outputFrameBuffer.ptr, outputBufferSize), );
@@ -592,7 +399,7 @@ int main(int argc, const char **argv) {
       scene.epsilon = 1e-5;
       scene.extent = 10.0f;
 
-      param.spp = 100000;
+      param.spp = 100;
       param.maxPathLength = 15;
     }
 
@@ -631,7 +438,7 @@ int main(int argc, const char **argv) {
           TOY_OPTIX_CHECK_OR_THROW(optixLaunch(state.pipeline,
                                                stream,
                                                (CUdeviceptr)paramPtrD,
-                                               sizeof(toy::LaunchParams),
+                                               sizeof(LaunchParams),
                                                &state.sbt,
                                                launchWidth,
                                                launchHeight,

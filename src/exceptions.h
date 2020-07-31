@@ -1,9 +1,10 @@
+#pragma once
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <exception>
 #include <optix.h>
 
-namespace toy {
 class CudaException : public std::exception {
 public:
   CudaException(cudaError_t code, const char *what)
@@ -40,8 +41,6 @@ private:
   OptixResult m_Code;
 };
 
-} // namespace toy
-
 #define TOY_CUDA_CHECK_OR_THROW(exp, cleanup)                                  \
   do {                                                                         \
     cudaError_t res = (exp);                                                   \
@@ -49,7 +48,7 @@ private:
       {                                                                        \
         cleanup;                                                               \
       }                                                                        \
-      throw toy::CudaException(res, cudaGetErrorString(res));                  \
+      throw CudaException(res, cudaGetErrorString(res));                       \
     }                                                                          \
   } while (0)
 
@@ -62,7 +61,7 @@ private:
       }                                                                        \
       const char *info;                                                        \
       cuGetErrorString(res, &info);                                            \
-      throw toy::CuException(res, info);                                       \
+      throw CuException(res, info);                                            \
     }                                                                          \
   } while (0)
 
@@ -73,6 +72,6 @@ private:
       {                                                                        \
         cleanup;                                                               \
       }                                                                        \
-      throw toy::OptixException(res, optixGetErrorString(res));                \
+      throw OptixException(res, optixGetErrorString(res));                     \
     }                                                                          \
   } while (0)
