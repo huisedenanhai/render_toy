@@ -2,6 +2,7 @@
 #include "exceptions.h"
 #include "pipeline.h"
 #include "vec_math.h"
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -13,11 +14,6 @@
 #include <tinyobj/tiny_obj_loader.h>
 #include <unordered_map>
 #include <vector>
-
-template <typename T> struct alignas(OPTIX_SBT_RECORD_ALIGNMENT) Record {
-  char header[OPTIX_SBT_RECORD_HEADER_SIZE];
-  T data;
-};
 
 struct OptixState {
   OptixDeviceContext context = 0;
@@ -148,15 +144,14 @@ int main(int argc, const char **argv) {
   // transform material data to target format
   // 0 if use default material
   int materialCnt = materials.size();
-  std::vector<Record<HitGroupData>> hitRecords(materialCnt == 0 ? 1
-                                                                : materialCnt);
+  std::vector<dev::HitGroupData> hitRecords(materialCnt == 0 ? 1 : materialCnt);
   if (materialCnt == 0) {
     // default material
-    hitRecords[0].data.baseColor = make_float3(0.5f, 0.5f, 0.5f);
-    hitRecords[0].data.emission = make_float3(0, 0, 0);
+    hitRecords[0].baseColor = make_float3(0.5f, 0.5f, 0.5f);
+    hitRecords[0].emission = make_float3(0, 0, 0);
   } else {
     for (int i = 0; i < materialCnt; i++) {
-      auto &data = hitRecords[i].data;
+      auto &data = hitRecords[i];
       const auto &mat = materials[i];
       data.baseColor =
           make_float3(mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
@@ -284,79 +279,24 @@ int main(int argc, const char **argv) {
           .build();
   state.pipeline = pipeline.pipeline;
   state.module = pipeline.modules[moduleName];
-  state.groups[state.rayGenGroupIndex] = pipeline.raygenGroups[0];
-  state.groups[state.missGroupIndex] = pipeline.missGroups[0];
-  state.groups[state.exceptionGroupIndex] = pipeline.exceptionGroups[0];
-  state.groups[state.hitGroupIndex] = pipeline.hitGroups[0];
+  state.groups[state.rayGenGroupIndex] = pipeline.raygenGroups()[0];
+  state.groups[state.missGroupIndex] = pipeline.missGroups()[0];
+  state.groups[state.exceptionGroupIndex] = pipeline.exceptionGroups()[0];
+  state.groups[state.hitGroupIndex] = pipeline.hitGroups()[0];
   // set up sbt
+  ShaderBindingTable sbt(&pipeline);
   {
-    {
-      Record<RayGenData> raygenRecord;
-      TOY_OPTIX_CHECK_OR_THROW(
-          optixSbtRecordPackHeader(state.groups[state.rayGenGroupIndex],
-                                   &raygenRecord), );
-      TOY_CUDA_CHECK_OR_THROW(
-          cudaMalloc(&state.raygenRecord.ptr, sizeof(raygenRecord)), );
-      TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(state.raygenRecord.ptr,
-                                         &raygenRecord,
-                                         sizeof(raygenRecord),
-                                         cudaMemcpyHostToDevice), );
-      state.sbt.raygenRecord = (CUdeviceptr)state.raygenRecord.ptr;
+    sbt.add_raygen_record<dev::RayGenData>(0);
+    auto exceptionRecord = sbt.add_exception_record<dev::ExceptionData>(0);
+    exceptionRecord->errorColor = make_float3(0, 1.0f, 0);
+    auto missRecord = sbt.add_miss_record<dev::MissData>(0);
+    missRecord->color = make_float3(0.0f, 0.0f, 0.0f);
+    for (auto &record : hitRecords) {
+      auto hitRecord = sbt.add_hit_record<dev::HitGroupData>(0);
+      *hitRecord = record;
     }
-    {
-      Record<ExceptionData> exceptionRecord;
-      exceptionRecord.data.errorColor = make_float3(0, 1.0f, 0);
-      TOY_OPTIX_CHECK_OR_THROW(
-          optixSbtRecordPackHeader(state.groups[state.exceptionGroupIndex],
-                                   &exceptionRecord), );
-      TOY_CUDA_CHECK_OR_THROW(
-          cudaMalloc(&state.exceptionRecord.ptr, sizeof(exceptionRecord)), );
-      TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(state.exceptionRecord.ptr,
-                                         &exceptionRecord,
-                                         sizeof(exceptionRecord),
-                                         cudaMemcpyHostToDevice), );
-      state.sbt.exceptionRecord = (CUdeviceptr)state.exceptionRecord.ptr;
-    }
-    {
-      Record<MissData> missRecord;
-      TOY_OPTIX_CHECK_OR_THROW(
-          optixSbtRecordPackHeader(state.groups[state.missGroupIndex],
-                                   &missRecord), );
-      missRecord.data.color = make_float3(0.0f, 0.0f, 0.0f);
-      TOY_CUDA_CHECK_OR_THROW(
-          cudaMalloc(&state.missRecords.ptr, sizeof(missRecord)), );
-      TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(state.missRecords.ptr,
-                                         &missRecord,
-                                         sizeof(missRecord),
-                                         cudaMemcpyHostToDevice), );
-      state.sbt.missRecordBase = (CUdeviceptr)state.missRecords.ptr;
-      state.sbt.missRecordStrideInBytes = sizeof(missRecord);
-      state.sbt.missRecordCount = 1;
-    }
-    {
-      for (auto &record : hitRecords) {
-        TOY_OPTIX_CHECK_OR_THROW(
-            optixSbtRecordPackHeader(state.groups[state.hitGroupIndex],
-                                     &record), );
-      }
-      auto hitRecordCnt = hitRecords.size();
-      auto hitRecordSize = sizeof(Record<HitGroupData>);
-      auto hitRecordBufSize = hitRecordCnt * hitRecordSize;
-      TOY_CUDA_CHECK_OR_THROW(
-          cudaMalloc(&state.hitRecords.ptr, hitRecordBufSize), );
-      TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(state.hitRecords.ptr,
-                                         hitRecords.data(),
-                                         hitRecordBufSize,
-                                         cudaMemcpyHostToDevice), );
-      state.sbt.hitgroupRecordBase = (CUdeviceptr)state.hitRecords.ptr;
-      state.sbt.hitgroupRecordStrideInBytes = hitRecordSize;
-      state.sbt.hitgroupRecordCount = hitRecordCnt;
-    }
-    {
-      state.sbt.callablesRecordBase = 0;
-      state.sbt.callablesRecordStrideInBytes = 0;
-      state.sbt.callablesRecordCount = 0;
-    }
+    sbt.commit();
+    state.sbt = sbt.sbt;
   }
   unsigned int frameWidth = 800, frameHeight = 800;
   unsigned int tileWidth = 64, tileHeight = 64;
@@ -375,7 +315,7 @@ int main(int argc, const char **argv) {
     TOY_CUDA_CHECK_OR_THROW(
         cudaMalloc(&state.outputFrameBuffer.ptr, outputBufferSize), );
 
-    LaunchParams launchParams[numStreams]{};
+    dev::LaunchParams launchParams[numStreams]{};
     // init common launchParam values
     for (int i = 0; i < numStreams; i++) {
       auto &param = launchParams[i];
@@ -386,7 +326,7 @@ int main(int argc, const char **argv) {
       camera.back = make_float3(0.0f, 0.0f, 1.0f);
       auto canvasWidth = frameWidth / frameResolution;
       auto canvasHeight = frameHeight / frameResolution;
-      camera.canvas = make_rect(
+      camera.canvas = dev::make_rect(
           -canvasWidth / 2.0f, -canvasHeight / 2.0f, canvasWidth, canvasHeight);
 
       auto &frame = param.outputFrame;
@@ -410,8 +350,9 @@ int main(int argc, const char **argv) {
       std::cout << "render start at " << std::ctime(&t) << std::flush;
     }
     {
-      TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&state.launchParams.ptr,
-                                         sizeof(LaunchParams) * numStreams), );
+      TOY_CUDA_CHECK_OR_THROW(
+          cudaMalloc(&state.launchParams.ptr,
+                     sizeof(dev::LaunchParams) * numStreams), );
       int streamIndex = 0;
       // tile frame for launch
       for (int x = 0; x < frameWidth; x += tileWidth) {
@@ -420,16 +361,16 @@ int main(int argc, const char **argv) {
           auto stream = streams[streamIndex];
           auto &param = launchParams[streamIndex];
           auto paramPtrD = (void *)((char *)state.launchParams.ptr +
-                                    streamIndex * sizeof(LaunchParams));
+                                    streamIndex * sizeof(dev::LaunchParams));
           // init tile
-          int launchWidth = min(tileWidth, frameWidth - x);
-          int launchHeight = min(tileHeight, frameHeight - y);
+          int launchWidth = std::min(tileWidth, frameWidth - x);
+          int launchHeight = std::min(tileHeight, frameHeight - y);
           auto &frame = param.outputFrame;
-          frame.tile = make_rect_int(x, y, launchWidth, launchHeight);
+          frame.tile = dev::make_rect_int(x, y, launchWidth, launchHeight);
 
           TOY_CUDA_CHECK_OR_THROW(cudaMemcpyAsync(paramPtrD,
                                                   &param,
-                                                  sizeof(LaunchParams),
+                                                  sizeof(dev::LaunchParams),
                                                   cudaMemcpyHostToDevice,
                                                   stream), );
 
@@ -438,7 +379,7 @@ int main(int argc, const char **argv) {
           TOY_OPTIX_CHECK_OR_THROW(optixLaunch(state.pipeline,
                                                stream,
                                                (CUdeviceptr)paramPtrD,
-                                               sizeof(LaunchParams),
+                                               sizeof(dev::LaunchParams),
                                                &state.sbt,
                                                launchWidth,
                                                launchHeight,

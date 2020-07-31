@@ -1,4 +1,5 @@
 #include "Context.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <fstream>
@@ -196,7 +197,7 @@ Pipeline PipelineBuilder::build() {
   {
     {
       auto count = raygenGroups.size();
-      pipeline.raygenGroups.resize(count);
+      pipeline.raygenGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
       std::vector<OptixProgramGroupDesc> desc;
@@ -216,11 +217,11 @@ Pipeline PipelineBuilder::build() {
                                   &options[0],
                                   0,
                                   0,
-                                  &pipeline.raygenGroups[0]), );
+                                  &pipeline.raygenGroups()[0]), );
     }
     {
       auto count = missGroups.size();
-      pipeline.missGroups.resize(count);
+      pipeline.missGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
       std::vector<OptixProgramGroupDesc> desc;
@@ -240,11 +241,11 @@ Pipeline PipelineBuilder::build() {
                                   &options[0],
                                   0,
                                   0,
-                                  &pipeline.missGroups[0]), );
+                                  &pipeline.missGroups()[0]), );
     }
     {
       auto count = exceptionGroups.size();
-      pipeline.exceptionGroups.resize(count);
+      pipeline.exceptionGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
       std::vector<OptixProgramGroupDesc> desc;
@@ -264,11 +265,11 @@ Pipeline PipelineBuilder::build() {
                                   &options[0],
                                   0,
                                   0,
-                                  &pipeline.exceptionGroups[0]), );
+                                  &pipeline.exceptionGroups()[0]), );
     }
     {
       auto count = hitGroups.size();
-      pipeline.hitGroups.resize(count);
+      pipeline.hitGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
       std::vector<OptixProgramGroupDesc> desc;
@@ -293,7 +294,7 @@ Pipeline PipelineBuilder::build() {
                                   &options[0],
                                   0,
                                   0,
-                                  &pipeline.hitGroups[0]), );
+                                  &pipeline.hitGroups()[0]), );
     }
     // link pipeline
     {
@@ -304,17 +305,10 @@ Pipeline PipelineBuilder::build() {
       std::vector<OptixProgramGroup> groups;
       groups.reserve(raygenGroups.size() + missGroups.size() +
                      exceptionGroups.size() + hitGroups.size());
-      for (auto g : pipeline.raygenGroups) {
-        groups.push_back(g);
-      }
-      for (auto g : pipeline.missGroups) {
-        groups.push_back(g);
-      }
-      for (auto g : pipeline.exceptionGroups) {
-        groups.push_back(g);
-      }
-      for (auto g : pipeline.hitGroups) {
-        groups.push_back(g);
+      for (int i = 0; i < Pipeline::groupCnt; i++) {
+        for (auto g : pipeline.groups[i]) {
+          groups.push_back(g);
+        }
       }
       TOY_OPTIX_CHECK_OR_THROW(optixPipelineCreate(Context::context,
                                                    &pipelineCompileOptions,
@@ -327,4 +321,59 @@ Pipeline PipelineBuilder::build() {
     }
   }
   return pipeline;
+}
+
+void ShaderBindingTable::commit() {
+  // build sbt
+  {
+    for (int i = 0; i < Pipeline::groupCnt; i++) {
+      // calculate stride and size
+      size_t stride = 0;
+      for (const auto &record : records[i]) {
+        stride = std::max(stride, record.size);
+      }
+      size_t size = records[i].size() * stride;
+      if (!sbtBuffers_d[i] || sbtBufferSizes[i] < size) {
+        TOY_CUDA_CHECK_OR_THROW(cudaFree(sbtBuffers_d[i]), );
+        TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&sbtBuffers_d[i], size), );
+      }
+      sbtBufferSizes[i] = size;
+      sbtBufferStrides[i] = stride;
+      // update data
+      for (size_t ri = 0; ri < records[i].size(); ri++) {
+        const auto &record = records[i][ri];
+        void *buf_d = (void *)((char *)sbtBuffers_d[i] + ri * stride);
+        TOY_CUDA_CHECK_OR_THROW(
+            cudaMemcpy(
+                buf_d, record.record, record.size, cudaMemcpyHostToDevice), );
+      }
+
+      // udpate sbt
+      sbt.raygenRecord = (CUdeviceptr)sbtBuffers_d[Pipeline::raygenGroupIndex];
+      sbt.exceptionRecord =
+          (CUdeviceptr)sbtBuffers_d[Pipeline::exceptionGroupIndex];
+      sbt.missRecordBase = (CUdeviceptr)sbtBuffers_d[Pipeline::missGroupIndex];
+      sbt.missRecordStrideInBytes = sbtBufferStrides[Pipeline::missGroupIndex];
+      sbt.missRecordCount = records[Pipeline::missGroupIndex].size();
+      sbt.hitgroupRecordBase =
+          (CUdeviceptr)sbtBuffers_d[Pipeline::hitGroupIndex];
+      sbt.hitgroupRecordStrideInBytes =
+          sbtBufferStrides[Pipeline::hitGroupIndex];
+      sbt.hitgroupRecordCount = records[Pipeline::hitGroupIndex].size();
+      sbt.callablesRecordBase = 0;
+      sbt.callablesRecordStrideInBytes = 0;
+      sbt.callablesRecordCount = 0;
+    }
+  }
+}
+
+ShaderBindingTable::~ShaderBindingTable() {
+  for (auto &record : records) {
+    for (auto &r : record) {
+      r.destroy();
+    }
+  }
+  for (auto &p_d : sbtBuffers_d) {
+    cudaFree(p_d);
+  }
 }

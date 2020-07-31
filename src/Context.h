@@ -1,5 +1,6 @@
 #pragma once
 
+#define NOMINMAX
 #include "exceptions.h"
 #include <iostream>
 #include <map>
@@ -46,10 +47,30 @@ struct CudaMemoryRAII {
 };
 
 struct Pipeline {
-  std::vector<OptixProgramGroup> raygenGroups;
-  std::vector<OptixProgramGroup> missGroups;
-  std::vector<OptixProgramGroup> exceptionGroups;
-  std::vector<OptixProgramGroup> hitGroups;
+  constexpr static int raygenGroupIndex = 0;
+  constexpr static int missGroupIndex = 1;
+  constexpr static int exceptionGroupIndex = 2;
+  constexpr static int hitGroupIndex = 3;
+  constexpr static int groupCnt = 4;
+
+  std::vector<OptixProgramGroup> groups[groupCnt];
+
+  inline std::vector<OptixProgramGroup> &raygenGroups() {
+    return groups[raygenGroupIndex];
+  }
+
+  inline std::vector<OptixProgramGroup> &missGroups() {
+    return groups[missGroupIndex];
+  }
+
+  inline std::vector<OptixProgramGroup> &exceptionGroups() {
+    return groups[exceptionGroupIndex];
+  }
+
+  inline std::vector<OptixProgramGroup> &hitGroups() {
+    return groups[hitGroupIndex];
+  }
+
   std::map<std::string, OptixModule> modules;
   OptixPipeline pipeline;
 };
@@ -57,6 +78,8 @@ struct Pipeline {
 // order of adding will be preserved
 struct PipelineBuilder {
   PipelineBuilder &set_launch_params(const std::string &name);
+  // these programs groups are supposed to be directly mapped to the concept of
+  // material
   PipelineBuilder &add_raygen_group(const std::string &module,
                                     const std::string &entry);
   PipelineBuilder &add_exception_group(const std::string &module,
@@ -84,6 +107,76 @@ struct PipelineBuilder {
   std::vector<Group> exceptionGroups;
   std::vector<Group> missGroups;
   std::vector<HitGroup> hitGroups;
+};
+
+template <typename T> struct alignas(OPTIX_SBT_RECORD_ALIGNMENT) Record {
+  char header[OPTIX_SBT_RECORD_HEADER_SIZE];
+  T data;
+};
+
+struct ShaderBindingTable {
+  struct RecordHandle {
+    void *record;
+    size_t size;
+
+    void destroy() {
+      delete record;
+    }
+  };
+
+  // the pipeline must be fully built
+  ShaderBindingTable(Pipeline *pipeline) {
+    this->pipeline = pipeline;
+    for (unsigned int i = 0; i < Pipeline::groupCnt; i++) {
+      records[i].resize(0);
+    }
+  }
+  ShaderBindingTable(const ShaderBindingTable &) = delete;
+  ShaderBindingTable(ShaderBindingTable &&) = delete;
+  ShaderBindingTable &operator=(const ShaderBindingTable &) = delete;
+  ShaderBindingTable &operator=(ShaderBindingTable &&) = delete;
+
+  ~ShaderBindingTable();
+
+  template <typename T>
+  T *add_record(unsigned int groupIndex, unsigned int index) {
+    auto record = new Record<T>;
+    TOY_OPTIX_CHECK_OR_THROW(
+        optixSbtRecordPackHeader(pipeline->groups[groupIndex][index],
+                                 record), );
+
+    RecordHandle handle{};
+    handle.record = record;
+    handle.size = sizeof(Record<T>);
+    records[groupIndex].push_back(handle);
+    return &record->data;
+  }
+
+  template <typename T> T *add_raygen_record(unsigned int index) {
+    return add_record<T>(Pipeline::raygenGroupIndex, index);
+  }
+
+  template <typename T> T *add_miss_record(unsigned int index) {
+    return add_record<T>(Pipeline::missGroupIndex, index);
+  }
+
+  template <typename T> T *add_exception_record(unsigned int index) {
+    return add_record<T>(Pipeline::exceptionGroupIndex, index);
+  }
+
+  template <typename T> T *add_hit_record(unsigned int index) {
+    return add_record<T>(Pipeline::hitGroupIndex, index);
+  }
+
+  void commit();
+
+  std::vector<RecordHandle> records[Pipeline::groupCnt];
+  Pipeline *pipeline;
+  // device memory buffers
+  void *sbtBuffers_d[Pipeline::groupCnt]{};
+  size_t sbtBufferSizes[Pipeline::groupCnt]{};
+  size_t sbtBufferStrides[Pipeline::groupCnt]{};
+  OptixShaderBindingTable sbt{};
 };
 
 // the struct Context does not meant to hide all optix implementation details,

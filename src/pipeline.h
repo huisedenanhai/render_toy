@@ -2,6 +2,7 @@
 
 #include <optix.h>
 
+namespace dev {
 // coordinate setting:
 // right hand coordinate, y points upward
 // for 2d space, origin point is at left bottom, y points up, x points right
@@ -99,3 +100,4 @@ struct HitGroupData {
   float3 baseColor;
   float3 emission;
 };
+} // namespace dev
