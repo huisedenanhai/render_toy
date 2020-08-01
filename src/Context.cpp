@@ -1,4 +1,5 @@
-#include "Context.h"
+#include "context.h"
+#include "vec_math.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -401,11 +402,29 @@ inline std::string pretty_format_bytes(size_t size) {
   return ss.str();
 }
 
+AABB GASBuilder::calculate_aabb() {
+  AABB aabb;
+  bool first = true;
+  for (unsigned int i = 0; i < primitiveCount * 3; i++) {
+    unsigned int index = indices[i];
+    float3 v = make_float3(
+        vertices[3 * index], vertices[3 * index + 1], vertices[3 * index + 2]);
+    if (first) {
+      aabb.min = aabb.max = v;
+      first = false;
+    } else {
+      aabb.extend_(v);
+    }
+  }
+  return aabb;
+}
+
 GAS GASBuilder::build() {
   GAS gas{};
   assert(vertices);
   assert(indices);
   assert(materialIds);
+  gas.aabb = calculate_aabb();
   // alloc buffers for vertices and indices
   size_t vertexBufferSize = vertexCount * sizeof(float) * 3;
   size_t indexBufferSize = primitiveCount * sizeof(unsigned int) * 3;
@@ -539,4 +558,27 @@ void GAS::destroy() {
   cudaFree(vertices_d);
   cudaFree(indices_d);
   cudaFree(materialIds_d);
+}
+
+AABB AABB::extend(const float3 &p) {
+  AABB aabb = *this;
+  aabb.extend_(p);
+  return aabb;
+}
+
+void AABB::extend_(const float3 &p) {
+  min.x = std::min(min.x, p.x);
+  min.y = std::min(min.y, p.y);
+  min.z = std::min(min.z, p.z);
+
+  max.x = std::max(max.x, p.x);
+  max.y = std::max(max.y, p.y);
+  max.z = std::max(max.z, p.z);
+}
+
+BoundingSphere AABB::get_bouding_sphere() {
+  BoundingSphere sphere;
+  sphere.center = 0.5f * (min + max);
+  sphere.radius = length(max - sphere.center);
+  return sphere;
 }

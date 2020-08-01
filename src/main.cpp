@@ -1,4 +1,4 @@
-#include "Context.h"
+#include "context.h"
 #include "exceptions.h"
 #include "pipeline.h"
 #include "vec_math.h"
@@ -209,7 +209,9 @@ int main(int argc, const char **argv) {
       auto &scene = param.scene;
       scene.gas = gas.gas;
       scene.epsilon = 1e-5;
-      scene.extent = 10.0f;
+      scene.extent =
+          gas.aabb.extend(camera.position).get_bouding_sphere().radius * 2.0f +
+          5.0f;
 
       param.spp = spp;
       param.maxPathLength = maxPathLength;

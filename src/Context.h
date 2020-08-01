@@ -54,6 +54,8 @@ struct Pipeline {
   constexpr static int groupCnt = 4;
 
   std::vector<OptixProgramGroup> groups[groupCnt];
+  std::map<std::string, OptixModule> modules;
+  OptixPipeline pipeline;
 
   inline std::vector<OptixProgramGroup> &raygenGroups() {
     return groups[raygenGroupIndex];
@@ -70,9 +72,6 @@ struct Pipeline {
   inline std::vector<OptixProgramGroup> &hitGroups() {
     return groups[hitGroupIndex];
   }
-
-  std::map<std::string, OptixModule> modules;
-  OptixPipeline pipeline;
 
   void destroy();
 };
@@ -187,18 +186,35 @@ struct ShaderBindingTableBuilder {
   Pipeline *pipeline;
 };
 
+struct BoundingSphere {
+  float3 center;
+  float radius;
+};
+
+struct AABB {
+  float3 min;
+  float3 max;
+
+  AABB extend(const float3 &p);
+  // extend in place
+  void extend_(const float3 &p);
+  BoundingSphere get_bouding_sphere();
+};
+
 struct GAS {
   OptixTraversableHandle gas = 0;
   void *accel_d = nullptr;
   void *vertices_d = nullptr;
   void *indices_d = nullptr;
   void *materialIds_d = nullptr;
+  AABB aabb;
 
   void destroy();
 };
 
 struct GASBuilder {
   GAS build();
+  AABB calculate_aabb();
 
   // all these arrays are packed
   float *vertices;
