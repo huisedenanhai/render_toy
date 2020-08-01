@@ -73,6 +73,8 @@ struct Pipeline {
 
   std::map<std::string, OptixModule> modules;
   OptixPipeline pipeline;
+
+  void destroy();
 };
 
 // order of adding will be preserved
@@ -115,6 +117,16 @@ template <typename T> struct alignas(OPTIX_SBT_RECORD_ALIGNMENT) Record {
 };
 
 struct ShaderBindingTable {
+  // device memory buffers
+  void *sbtBuffers_d[Pipeline::groupCnt]{};
+  size_t sbtBufferSizes[Pipeline::groupCnt]{};
+  size_t sbtBufferStrides[Pipeline::groupCnt]{};
+  OptixShaderBindingTable sbt{};
+
+  void destroy();
+};
+
+struct ShaderBindingTableBuilder {
   struct RecordHandle {
     void *record;
     size_t size;
@@ -125,18 +137,19 @@ struct ShaderBindingTable {
   };
 
   // the pipeline must be fully built
-  ShaderBindingTable(Pipeline *pipeline) {
+  ShaderBindingTableBuilder(Pipeline *pipeline) {
     this->pipeline = pipeline;
     for (unsigned int i = 0; i < Pipeline::groupCnt; i++) {
       records[i].resize(0);
     }
   }
-  ShaderBindingTable(const ShaderBindingTable &) = delete;
-  ShaderBindingTable(ShaderBindingTable &&) = delete;
-  ShaderBindingTable &operator=(const ShaderBindingTable &) = delete;
-  ShaderBindingTable &operator=(ShaderBindingTable &&) = delete;
+  ShaderBindingTableBuilder(const ShaderBindingTableBuilder &) = delete;
+  ShaderBindingTableBuilder(ShaderBindingTableBuilder &&) = delete;
+  ShaderBindingTableBuilder &
+  operator=(const ShaderBindingTableBuilder &) = delete;
+  ShaderBindingTableBuilder &operator=(ShaderBindingTableBuilder &&) = delete;
 
-  ~ShaderBindingTable();
+  ~ShaderBindingTableBuilder();
 
   template <typename T>
   T *add_record(unsigned int groupIndex, unsigned int index) {
@@ -168,15 +181,10 @@ struct ShaderBindingTable {
     return add_record<T>(Pipeline::hitGroupIndex, index);
   }
 
-  void commit();
+  ShaderBindingTable build();
 
   std::vector<RecordHandle> records[Pipeline::groupCnt];
   Pipeline *pipeline;
-  // device memory buffers
-  void *sbtBuffers_d[Pipeline::groupCnt]{};
-  size_t sbtBufferSizes[Pipeline::groupCnt]{};
-  size_t sbtBufferStrides[Pipeline::groupCnt]{};
-  OptixShaderBindingTable sbt{};
 };
 
 struct GAS {
@@ -185,6 +193,8 @@ struct GAS {
   void *vertices_d = nullptr;
   void *indices_d = nullptr;
   void *materialIds_d = nullptr;
+
+  void destroy();
 };
 
 struct GASBuilder {

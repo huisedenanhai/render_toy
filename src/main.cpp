@@ -151,18 +151,19 @@ int main(int argc, const char **argv) {
               moduleName, "__closesthit__entry", moduleName, "__anyhit__entry")
           .build();
   // set up sbt
-  ShaderBindingTable sbt(&pipeline);
+  ShaderBindingTable sbt;
   {
-    sbt.add_raygen_record<dev::RayGenData>(0);
-    auto exceptionRecord = sbt.add_exception_record<dev::ExceptionData>(0);
+    ShaderBindingTableBuilder builder(&pipeline);
+    builder.add_raygen_record<dev::RayGenData>(0);
+    auto exceptionRecord = builder.add_exception_record<dev::ExceptionData>(0);
     exceptionRecord->errorColor = make_float3(0, 1.0f, 0);
-    auto missRecord = sbt.add_miss_record<dev::MissData>(0);
+    auto missRecord = builder.add_miss_record<dev::MissData>(0);
     missRecord->color = make_float3(0.0f, 0.0f, 0.0f);
     for (auto &record : hitRecords) {
-      auto hitRecord = sbt.add_hit_record<dev::HitGroupData>(0);
+      auto hitRecord = builder.add_hit_record<dev::HitGroupData>(0);
       *hitRecord = record;
     }
-    sbt.commit();
+    sbt = builder.build();
   }
 
   unsigned int frameWidth = 800, frameHeight = 800;

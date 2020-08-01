@@ -327,58 +327,57 @@ Pipeline PipelineBuilder::build() {
   return pipeline;
 }
 
-void ShaderBindingTable::commit() {
-  // build sbt
-  {
-    for (int i = 0; i < Pipeline::groupCnt; i++) {
-      // calculate stride and size
-      size_t stride = 0;
-      for (const auto &record : records[i]) {
-        stride = std::max(stride, record.size);
-      }
-      size_t size = records[i].size() * stride;
-      if (!sbtBuffers_d[i] || sbtBufferSizes[i] < size) {
-        TOY_CUDA_CHECK_OR_THROW(cudaFree(sbtBuffers_d[i]), );
-        TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&sbtBuffers_d[i], size), );
-      }
-      sbtBufferSizes[i] = size;
-      sbtBufferStrides[i] = stride;
-      // update data
-      for (size_t ri = 0; ri < records[i].size(); ri++) {
-        const auto &record = records[i][ri];
-        void *buf_d = (void *)((char *)sbtBuffers_d[i] + ri * stride);
-        TOY_CUDA_CHECK_OR_THROW(
-            cudaMemcpy(
-                buf_d, record.record, record.size, cudaMemcpyHostToDevice), );
-      }
-
-      // udpate sbt
-      sbt.raygenRecord = (CUdeviceptr)sbtBuffers_d[Pipeline::raygenGroupIndex];
-      sbt.exceptionRecord =
-          (CUdeviceptr)sbtBuffers_d[Pipeline::exceptionGroupIndex];
-      sbt.missRecordBase = (CUdeviceptr)sbtBuffers_d[Pipeline::missGroupIndex];
-      sbt.missRecordStrideInBytes = sbtBufferStrides[Pipeline::missGroupIndex];
-      sbt.missRecordCount = records[Pipeline::missGroupIndex].size();
-      sbt.hitgroupRecordBase =
-          (CUdeviceptr)sbtBuffers_d[Pipeline::hitGroupIndex];
-      sbt.hitgroupRecordStrideInBytes =
-          sbtBufferStrides[Pipeline::hitGroupIndex];
-      sbt.hitgroupRecordCount = records[Pipeline::hitGroupIndex].size();
-      sbt.callablesRecordBase = 0;
-      sbt.callablesRecordStrideInBytes = 0;
-      sbt.callablesRecordCount = 0;
+ShaderBindingTable ShaderBindingTableBuilder::build() {
+  ShaderBindingTable sbt;
+  for (int i = 0; i < Pipeline::groupCnt; i++) {
+    // calculate stride and size
+    size_t stride = 0;
+    for (const auto &record : records[i]) {
+      stride = std::max(stride, record.size);
+    }
+    size_t size = records[i].size() * stride;
+    if (!sbt.sbtBuffers_d[i] || sbt.sbtBufferSizes[i] < size) {
+      TOY_CUDA_CHECK_OR_THROW(cudaFree(sbt.sbtBuffers_d[i]), );
+      TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&sbt.sbtBuffers_d[i], size), );
+    }
+    sbt.sbtBufferSizes[i] = size;
+    sbt.sbtBufferStrides[i] = stride;
+    // update data
+    for (size_t ri = 0; ri < records[i].size(); ri++) {
+      const auto &record = records[i][ri];
+      void *buf_d = (void *)((char *)sbt.sbtBuffers_d[i] + ri * stride);
+      TOY_CUDA_CHECK_OR_THROW(
+          cudaMemcpy(
+              buf_d, record.record, record.size, cudaMemcpyHostToDevice), );
     }
   }
+
+  // udpate sbt
+  sbt.sbt.raygenRecord =
+      (CUdeviceptr)sbt.sbtBuffers_d[Pipeline::raygenGroupIndex];
+  sbt.sbt.exceptionRecord =
+      (CUdeviceptr)sbt.sbtBuffers_d[Pipeline::exceptionGroupIndex];
+  sbt.sbt.missRecordBase =
+      (CUdeviceptr)sbt.sbtBuffers_d[Pipeline::missGroupIndex];
+  sbt.sbt.missRecordStrideInBytes =
+      sbt.sbtBufferStrides[Pipeline::missGroupIndex];
+  sbt.sbt.missRecordCount = records[Pipeline::missGroupIndex].size();
+  sbt.sbt.hitgroupRecordBase =
+      (CUdeviceptr)sbt.sbtBuffers_d[Pipeline::hitGroupIndex];
+  sbt.sbt.hitgroupRecordStrideInBytes =
+      sbt.sbtBufferStrides[Pipeline::hitGroupIndex];
+  sbt.sbt.hitgroupRecordCount = records[Pipeline::hitGroupIndex].size();
+  sbt.sbt.callablesRecordBase = 0;
+  sbt.sbt.callablesRecordStrideInBytes = 0;
+  sbt.sbt.callablesRecordCount = 0;
+  return sbt;
 }
 
-ShaderBindingTable::~ShaderBindingTable() {
+ShaderBindingTableBuilder::~ShaderBindingTableBuilder() {
   for (auto &record : records) {
     for (auto &r : record) {
       r.destroy();
     }
-  }
-  for (auto &p_d : sbtBuffers_d) {
-    cudaFree(p_d);
   }
 }
 
@@ -520,4 +519,24 @@ GAS GASBuilder::build() {
   }
 
   return gas;
+}
+
+void Pipeline::destroy() {
+  for (auto &pairs : modules) {
+    optixModuleDestroy(pairs.second);
+  }
+  optixPipelineDestroy(pipeline);
+}
+
+void ShaderBindingTable::destroy() {
+  for (auto buf : sbtBuffers_d) {
+    cudaFree(buf);
+  }
+}
+
+void GAS::destroy() {
+  cudaFree(accel_d);
+  cudaFree(vertices_d);
+  cudaFree(indices_d);
+  cudaFree(materialIds_d);
 }
