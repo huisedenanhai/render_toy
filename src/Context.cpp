@@ -83,6 +83,7 @@ static void optix_log_callback(unsigned int level,
 
 void Context::init() {
   TOY_CU_CHECK_OR_THROW(cuInit(0), );
+  TOY_CUDA_CHECK_OR_THROW(cudaFree(0), );
   TOY_OPTIX_CHECK_OR_THROW(optixInit(), );
   {
     OptixDeviceContextOptions options{};
@@ -376,4 +377,92 @@ ShaderBindingTable::~ShaderBindingTable() {
   for (auto &p_d : sbtBuffers_d) {
     cudaFree(p_d);
   }
+}
+
+GAS GASBuilder::build() {
+  GAS gas{};
+  assert(vertices);
+  assert(indices);
+  assert(materialIds);
+  // alloc buffers for vertices and indices
+  size_t vertexBufferSize = vertexCount * sizeof(float) * 3;
+  size_t indexBufferSize = primitiveCount * sizeof(unsigned int) * 3;
+  size_t materialIdBufferSize = primitiveCount * sizeof(unsigned int);
+  TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&gas.vertices_d, vertexBufferSize), );
+  TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&gas.indices_d, indexBufferSize), );
+  TOY_CUDA_CHECK_OR_THROW(
+      cudaMalloc(&gas.materialIds_d, materialIdBufferSize), );
+  // copy data to cuda
+  TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(gas.vertices_d,
+                                     vertices,
+                                     vertexBufferSize,
+                                     cudaMemcpyHostToDevice), );
+  TOY_CUDA_CHECK_OR_THROW(
+      cudaMemcpy(
+          gas.indices_d, indices, indexBufferSize, cudaMemcpyHostToDevice), );
+  TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(gas.materialIds_d,
+                                     materialIds,
+                                     materialIdBufferSize,
+                                     cudaMemcpyHostToDevice), );
+  // build gas
+  OptixAccelBuildOptions options{};
+  options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION |
+                       OPTIX_BUILD_FLAG_PREFER_FAST_TRACE |
+                       OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS;
+  // no motion
+  options.motionOptions.numKeys = 1;
+  options.operation = OPTIX_BUILD_OPERATION_BUILD;
+
+  OptixBuildInput buildInput{};
+  buildInput.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
+  auto &triangles = buildInput.triangleArray;
+  triangles.vertexBuffers = (CUdeviceptr *)(&gas.vertices_d);
+  triangles.numVertices = vertexCount;
+  triangles.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
+  triangles.vertexStrideInBytes = sizeof(float3);
+  triangles.indexBuffer = (CUdeviceptr)gas.indices_d;
+  triangles.numIndexTriplets = primitiveCount;
+  triangles.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
+  triangles.indexStrideInBytes = sizeof(uint3);
+  triangles.preTransform = 0;
+  auto flags = std::make_unique<unsigned int[]>(materialCount);
+  for (int i = 0; i < materialCount; i++) {
+    flags[i] = OPTIX_GEOMETRY_FLAG_NONE;
+  }
+  triangles.flags = flags.get();
+  triangles.numSbtRecords = materialCount;
+  triangles.sbtIndexOffsetBuffer = (CUdeviceptr)(gas.materialIds_d);
+  triangles.sbtIndexOffsetSizeInBytes = sizeof(unsigned int);
+  triangles.sbtIndexOffsetStrideInBytes = sizeof(unsigned int);
+  triangles.primitiveIndexOffset = 0;
+
+  // alloc buffers
+  OptixAccelBufferSizes bufferSizes{};
+  TOY_OPTIX_CHECK_OR_THROW(
+      optixAccelComputeMemoryUsage(
+          Context::context, &options, &buildInput, 1, &bufferSizes), );
+  TOY_CUDA_CHECK_OR_THROW(
+      cudaMalloc(&gas.accel_d, bufferSizes.outputSizeInBytes), );
+  CudaMemoryRAII tmpBuffer{};
+  TOY_CUDA_CHECK_OR_THROW(
+      cudaMalloc(&tmpBuffer.ptr, bufferSizes.tempSizeInBytes), );
+  // from optix SDK samples, and comments of cudaMalloc, it seems safe to assume
+  // memory returned from cudaMalloc is properly aligned
+  assert((size_t)(gas.accel_d) % OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT == 0);
+  assert((size_t)(tmpBuffer.ptr) % OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT == 0);
+  TOY_OPTIX_CHECK_OR_THROW(optixAccelBuild(Context::context,
+                                           0,
+                                           &options,
+                                           &buildInput,
+                                           1,
+                                           (CUdeviceptr)tmpBuffer.ptr,
+                                           bufferSizes.tempSizeInBytes,
+                                           (CUdeviceptr)gas.accel_d,
+                                           bufferSizes.outputSizeInBytes,
+                                           &gas.gas,
+                                           nullptr,
+                                           0), );
+  TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
+
+  return gas;
 }

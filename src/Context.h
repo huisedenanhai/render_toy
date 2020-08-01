@@ -179,6 +179,29 @@ struct ShaderBindingTable {
   OptixShaderBindingTable sbt{};
 };
 
+struct GAS {
+  OptixTraversableHandle gas = 0;
+  void *accel_d = nullptr;
+  void *vertices_d = nullptr;
+  void *indices_d = nullptr;
+  void *materialIds_d = nullptr;
+};
+
+struct GASBuilder {
+  GAS build();
+
+  // all these arrays are packed
+  float *vertices;
+  // how many triples are in the vertices buffer
+  unsigned int vertexCount;
+  unsigned int *indices;
+  // with size of primitive count, stores offset of hit records in sbt
+  unsigned int *materialIds;
+  unsigned int primitiveCount;
+  // how many hit records in sbt
+  unsigned int materialCount;
+};
+
 // the struct Context does not meant to hide all optix implementation details,
 // but rather provides a cleaner wrapper for use.
 struct Context {

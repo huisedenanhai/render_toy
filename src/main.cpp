@@ -15,46 +15,6 @@
 #include <unordered_map>
 #include <vector>
 
-struct OptixState {
-  OptixDeviceContext context = 0;
-  OptixTraversableHandle gas = 0;
-  OptixModule module = 0;
-
-  constexpr static int rayGenGroupIndex = 0;
-  constexpr static int missGroupIndex = 1;
-  constexpr static int exceptionGroupIndex = 2;
-  constexpr static int hitGroupIndex = 3;
-  constexpr static int groupCnt = 4;
-
-  OptixProgramGroup groups[groupCnt]{0};
-  OptixPipeline pipeline = 0;
-
-  OptixShaderBindingTable sbt;
-  CudaMemoryRAII raygenRecord;
-  CudaMemoryRAII exceptionRecord;
-  CudaMemoryRAII missRecords;
-  CudaMemoryRAII hitRecords;
-
-  CudaMemoryRAII launchParams;
-
-  CudaMemoryRAII outputFrameBuffer;
-
-  OptixState() = default;
-  OptixState(const OptixState &) = delete;
-  OptixState(OptixState &&) = delete;
-  OptixState &operator=(const OptixState &) = delete;
-  OptixState &operator=(OptixState &&) = delete;
-
-  ~OptixState() {
-    optixPipelineDestroy(pipeline);
-    for (int i = 0; i < groupCnt; i++) {
-      optixProgramGroupDestroy(groups[i]);
-    }
-    optixModuleDestroy(module);
-    optixDeviceContextDestroy(context);
-  }
-};
-
 static void configure_ptx_dir(const char *exeDir) {
   int pathLen = parent_dir_len(exeDir);
   char seperator = exeDir[pathLen];
@@ -78,6 +38,9 @@ int main(int argc, const char **argv) {
     printf("no input file specified, stop.");
     return 0;
   }
+  // init optix
+  Context::init();
+
   // load obj
   tinyobj::attrib_t attrib;
   std::vector<tinyobj::shape_t> shapes;
@@ -104,43 +67,31 @@ int main(int argc, const char **argv) {
       std::cout << std::endl;
     }
   }
-  // copy data to device
-  TOY_CUDA_CHECK_OR_THROW(cudaFree(0), );
   static_assert(std::is_same_v<tinyobj::real_t, float>,
                 "only float data is supported");
-  CudaMemoryRAII vertices_d{};
-  int numVertices = attrib.vertices.size();
-  {
-    auto verticesBufferSize = numVertices * sizeof(float);
-    TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&vertices_d.ptr, verticesBufferSize), );
-    TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(vertices_d.ptr,
-                                       attrib.vertices.data(),
-                                       verticesBufferSize,
-                                       cudaMemcpyHostToDevice), );
-  }
-  // per vertices indices
-  CudaMemoryRAII indices_d{};
+
+  GASBuilder gasBuilder;
+  gasBuilder.vertices = &attrib.vertices[0];
+  gasBuilder.vertexCount = attrib.vertices.size() / 3;
+
   // should be multiple of 3
   int indicesCnt = 0;
-  {
-    auto shapeCnt = shapes.size();
-    for (const auto &shape : shapes) {
-      indicesCnt += shape.mesh.indices.size();
-    }
-    assert(indicesCnt % 3 == 0);
-    auto indices_h = std::make_unique<unsigned int[]>(indicesCnt);
-    int index = 0;
-    for (const auto &shape : shapes) {
-      for (const auto &indice : shape.mesh.indices) {
-        indices_h[index++] = indice.vertex_index;
-      }
-    }
-    auto bufSize = sizeof(unsigned int) * indicesCnt;
-    TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&indices_d.ptr, bufSize), );
-    TOY_CUDA_CHECK_OR_THROW(
-        cudaMemcpy(
-            indices_d.ptr, indices_h.get(), bufSize, cudaMemcpyHostToDevice), );
+  auto shapeCnt = shapes.size();
+  for (const auto &shape : shapes) {
+    indicesCnt += shape.mesh.indices.size();
   }
+  assert(indicesCnt % 3 == 0);
+  auto indices_h = std::make_unique<unsigned int[]>(indicesCnt);
+  int index = 0;
+  for (const auto &shape : shapes) {
+    for (const auto &indice : shape.mesh.indices) {
+      indices_h[index++] = indice.vertex_index;
+    }
+  }
+
+  gasBuilder.indices = indices_h.get();
+  gasBuilder.primitiveCount = indicesCnt / 3;
+
   // transform material data to target format
   // 0 if use default material
   int materialCnt = materials.size();
@@ -170,102 +121,24 @@ int main(int argc, const char **argv) {
     }
   }
 
-  // per premitive material indices
-  CudaMemoryRAII materialIds_d{};
-  int primitiveCnt = indicesCnt / 3;
+  // per primitive material indices
+  auto matIds = std::make_unique<unsigned int[]>(gasBuilder.primitiveCount);
+  int faceCnt = 0;
   if (materialCnt > 1) {
-    auto buf = std::make_unique<unsigned int[]>(primitiveCnt);
-    int faceCnt = 0;
     for (const auto &shape : shapes) {
       const auto &mats = shape.mesh.material_ids;
-      memcpy(buf.get() + faceCnt, mats.data(), mats.size() * sizeof(int));
+      memcpy(matIds.get() + faceCnt, mats.data(), mats.size() * sizeof(int));
       faceCnt += mats.size();
     }
-    assert(faceCnt == primitiveCnt);
-    auto bufSize = primitiveCnt * sizeof(unsigned int);
-    TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&materialIds_d.ptr, bufSize), );
-    TOY_CUDA_CHECK_OR_THROW(
-        cudaMemcpy(
-            materialIds_d.ptr, buf.get(), bufSize, cudaMemcpyHostToDevice), );
+    assert(faceCnt == gasBuilder.primitiveCount);
+  } else {
+    memset(matIds.get(), 0, gasBuilder.primitiveCount * sizeof(unsigned int));
   }
+  gasBuilder.materialIds = matIds.get();
+  gasBuilder.materialCount = materialCnt == 0 ? 1 : materialCnt;
 
-  // init optix
-  OptixState state;
-  Context::init();
-  state.context = Context::context;
-  // build gas
-  CudaMemoryRAII accelOutputBuffer{};
-  {
-    OptixAccelBuildOptions options{};
-    options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION |
-                         OPTIX_BUILD_FLAG_PREFER_FAST_TRACE |
-                         OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS;
-    // no motion
-    options.motionOptions.numKeys = 1;
-    options.operation = OPTIX_BUILD_OPERATION_BUILD;
-
-    OptixBuildInput buildInput{};
-    buildInput.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
-    auto &triangles = buildInput.triangleArray;
-    triangles.vertexBuffers = (CUdeviceptr *)(&vertices_d.ptr);
-    triangles.numVertices = numVertices;
-    triangles.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
-    triangles.vertexStrideInBytes = sizeof(float) * 3;
-    triangles.indexBuffer = (CUdeviceptr)indices_d.ptr;
-    triangles.numIndexTriplets = primitiveCnt;
-    triangles.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
-    triangles.indexStrideInBytes = sizeof(unsigned int) * 3;
-    triangles.preTransform = 0;
-    auto sbtNum = materialCnt > 0 ? materialCnt : 1;
-    auto flags = std::make_unique<unsigned int[]>(sbtNum);
-    for (int i = 0; i < sbtNum; i++) {
-      flags[i] = OPTIX_GEOMETRY_FLAG_NONE;
-    }
-    if (materialCnt > 1) {
-      triangles.flags = flags.get();
-      triangles.numSbtRecords = materialCnt;
-      triangles.sbtIndexOffsetBuffer = (CUdeviceptr)materialIds_d.ptr;
-      triangles.sbtIndexOffsetSizeInBytes = sizeof(unsigned int);
-      triangles.sbtIndexOffsetStrideInBytes = sizeof(unsigned int);
-    } else {
-      triangles.flags = flags.get();
-      triangles.numSbtRecords = 1;
-      triangles.sbtIndexOffsetBuffer = 0;
-      triangles.sbtIndexOffsetSizeInBytes = 0;
-      triangles.sbtIndexOffsetStrideInBytes = 0;
-    }
-    triangles.primitiveIndexOffset = 0;
-
-    // alloc buffers
-    OptixAccelBufferSizes bufferSizes{};
-    TOY_OPTIX_CHECK_OR_THROW(
-        optixAccelComputeMemoryUsage(
-            state.context, &options, &buildInput, 1, &bufferSizes), );
-    TOY_CUDA_CHECK_OR_THROW(
-        cudaMalloc(&accelOutputBuffer.ptr, bufferSizes.outputSizeInBytes), );
-    CudaMemoryRAII tmpBuffer{};
-    TOY_CUDA_CHECK_OR_THROW(
-        cudaMalloc(&tmpBuffer.ptr, bufferSizes.tempSizeInBytes), );
-    // from optix SDK samples, it seems safe to assume memory returned from
-    // cudaMalloc is properly aligned
-    assert((size_t)(accelOutputBuffer.ptr) %
-               OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT ==
-           0);
-    assert((size_t)(tmpBuffer.ptr) % OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT == 0);
-    TOY_OPTIX_CHECK_OR_THROW(optixAccelBuild(state.context,
-                                             0,
-                                             &options,
-                                             &buildInput,
-                                             1,
-                                             (CUdeviceptr)tmpBuffer.ptr,
-                                             bufferSizes.tempSizeInBytes,
-                                             (CUdeviceptr)accelOutputBuffer.ptr,
-                                             bufferSizes.outputSizeInBytes,
-                                             &state.gas,
-                                             nullptr,
-                                             0), );
-    TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
-  }
+  // build accel
+  auto gas = gasBuilder.build();
   // assemble pipeline
   auto moduleName = "pipeline.ptx";
   auto pipeline =
@@ -277,12 +150,6 @@ int main(int argc, const char **argv) {
           .add_hit_group(
               moduleName, "__closesthit__entry", moduleName, "__anyhit__entry")
           .build();
-  state.pipeline = pipeline.pipeline;
-  state.module = pipeline.modules[moduleName];
-  state.groups[state.rayGenGroupIndex] = pipeline.raygenGroups()[0];
-  state.groups[state.missGroupIndex] = pipeline.missGroups()[0];
-  state.groups[state.exceptionGroupIndex] = pipeline.exceptionGroups()[0];
-  state.groups[state.hitGroupIndex] = pipeline.hitGroups()[0];
   // set up sbt
   ShaderBindingTable sbt(&pipeline);
   {
@@ -296,11 +163,13 @@ int main(int argc, const char **argv) {
       *hitRecord = record;
     }
     sbt.commit();
-    state.sbt = sbt.sbt;
   }
+
   unsigned int frameWidth = 800, frameHeight = 800;
   unsigned int tileWidth = 64, tileHeight = 64;
   float frameResolution = 1000;
+  unsigned int spp = 100000;
+  unsigned int maxPathLength = 15;
   auto outputBufferSize = frameWidth * frameHeight * sizeof(float3);
   constexpr unsigned int numStreams = 8;
 
@@ -309,11 +178,13 @@ int main(int argc, const char **argv) {
     TOY_CUDA_CHECK_OR_THROW(cudaStreamCreate(&streams[i]), );
   }
 
+  CudaMemoryRAII outputFrameBuffer;
+
   // launch
   {
     // alloc output frame buffer
     TOY_CUDA_CHECK_OR_THROW(
-        cudaMalloc(&state.outputFrameBuffer.ptr, outputBufferSize), );
+        cudaMalloc(&outputFrameBuffer.ptr, outputBufferSize), );
 
     dev::LaunchParams launchParams[numStreams]{};
     // init common launchParam values
@@ -332,17 +203,18 @@ int main(int argc, const char **argv) {
       auto &frame = param.outputFrame;
       frame.width = frameWidth;
       frame.height = frameHeight;
-      frame.buffer = (float3 *)state.outputFrameBuffer.ptr;
+      frame.buffer = (float3 *)outputFrameBuffer.ptr;
 
       auto &scene = param.scene;
-      scene.gas = state.gas;
+      scene.gas = gas.gas;
       scene.epsilon = 1e-5;
       scene.extent = 10.0f;
 
-      param.spp = 100;
-      param.maxPathLength = 15;
+      param.spp = spp;
+      param.maxPathLength = maxPathLength;
     }
 
+    CudaMemoryRAII launchParams_d;
     auto startTime = std::chrono::system_clock::now();
 
     {
@@ -351,7 +223,7 @@ int main(int argc, const char **argv) {
     }
     {
       TOY_CUDA_CHECK_OR_THROW(
-          cudaMalloc(&state.launchParams.ptr,
+          cudaMalloc(&launchParams_d.ptr,
                      sizeof(dev::LaunchParams) * numStreams), );
       int streamIndex = 0;
       // tile frame for launch
@@ -360,7 +232,7 @@ int main(int argc, const char **argv) {
              y += tileHeight, streamIndex = (streamIndex + 1) % numStreams) {
           auto stream = streams[streamIndex];
           auto &param = launchParams[streamIndex];
-          auto paramPtrD = (void *)((char *)state.launchParams.ptr +
+          auto paramPtrD = (void *)((char *)launchParams_d.ptr +
                                     streamIndex * sizeof(dev::LaunchParams));
           // init tile
           int launchWidth = std::min(tileWidth, frameWidth - x);
@@ -376,11 +248,11 @@ int main(int argc, const char **argv) {
 
           // launch size should match exactly with cropped size of the ouput
           // frame
-          TOY_OPTIX_CHECK_OR_THROW(optixLaunch(state.pipeline,
+          TOY_OPTIX_CHECK_OR_THROW(optixLaunch(pipeline.pipeline,
                                                stream,
                                                (CUdeviceptr)paramPtrD,
                                                sizeof(dev::LaunchParams),
-                                               &state.sbt,
+                                               &sbt.sbt,
                                                launchWidth,
                                                launchHeight,
                                                1), );
@@ -411,7 +283,7 @@ int main(int argc, const char **argv) {
     auto elemCnt = frameWidth * frameHeight * 3;
     auto result = std::make_unique<float[]>(elemCnt);
     TOY_CUDA_CHECK_OR_THROW(cudaMemcpy((void *)result.get(),
-                                       state.outputFrameBuffer.ptr,
+                                       outputFrameBuffer.ptr,
                                        outputBufferSize,
                                        cudaMemcpyDeviceToHost), );
     auto resultAsBytes = std::make_unique<unsigned char[]>(elemCnt);
