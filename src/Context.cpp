@@ -3,7 +3,9 @@
 #include <cassert>
 #include <cstdio>
 #include <fstream>
+#include <iomanip>
 #include <optix_function_table_definition.h>
+#include <sstream>
 
 // convert path seperator to '/'
 void convert_path_seperator(std::string &s) {
@@ -92,6 +94,8 @@ void Context::init() {
     options.logCallbackData = nullptr;
     TOY_OPTIX_CHECK_OR_THROW(optixDeviceContextCreate(0, &options, &context), );
   }
+
+  std::cout << "Optix initialized. Version " << OPTIX_VERSION << std::endl;
 }
 
 static void common_add_group(std::vector<PipelineBuilder::Group> &groups,
@@ -302,7 +306,6 @@ Pipeline PipelineBuilder::build() {
       OptixPipelineLinkOptions linkOptions;
       linkOptions.maxTraceDepth = 2;
       linkOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
-      linkOptions.overrideUsesMotionBlur = 0;
       std::vector<OptixProgramGroup> groups;
       groups.reserve(raygenGroups.size() + missGroups.size() +
                      exceptionGroups.size() + hitGroups.size());
@@ -379,6 +382,26 @@ ShaderBindingTable::~ShaderBindingTable() {
   }
 }
 
+inline std::string pretty_format_bytes(size_t size) {
+  std::string postfix = "Bytes";
+  double sd = size;
+  if (sd > 1024) {
+    sd /= 1024.0;
+    postfix = "KB";
+  }
+  if (sd > 1024) {
+    sd /= 1024.0;
+    postfix = "MB";
+  }
+  if (sd > 1024.0) {
+    sd /= 1024.0;
+    postfix = "GB";
+  }
+  std::stringstream ss;
+  ss << std::fixed << std::setprecision(2) << sd << postfix;
+  return ss.str();
+}
+
 GAS GASBuilder::build() {
   GAS gas{};
   assert(vertices);
@@ -450,6 +473,12 @@ GAS GASBuilder::build() {
   // memory returned from cudaMalloc is properly aligned
   assert((size_t)(gas.accel_d) % OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT == 0);
   assert((size_t)(tmpBuffer.ptr) % OPTIX_ACCEL_BUFFER_BYTE_ALIGNMENT == 0);
+
+  CudaMemoryRAII compactedSize_d;
+  TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&compactedSize_d.ptr, sizeof(size_t)), );
+  OptixAccelEmitDesc property;
+  property.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+  property.result = (CUdeviceptr)compactedSize_d.ptr;
   TOY_OPTIX_CHECK_OR_THROW(optixAccelBuild(Context::context,
                                            0,
                                            &options,
@@ -460,9 +489,35 @@ GAS GASBuilder::build() {
                                            (CUdeviceptr)gas.accel_d,
                                            bufferSizes.outputSizeInBytes,
                                            &gas.gas,
-                                           nullptr,
-                                           0), );
+                                           &property,
+                                           1), );
   TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
+  // do compaction
+  size_t compactedSize;
+  TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(&compactedSize,
+                                     compactedSize_d.ptr,
+                                     sizeof(size_t),
+                                     cudaMemcpyDeviceToHost), );
+  if (compactedSize < bufferSizes.outputSizeInBytes) {
+    std::cout << "Compact acceleration structure. Uncompacted size = "
+              << pretty_format_bytes(bufferSizes.outputSizeInBytes)
+              << ", compacted size = " << pretty_format_bytes(compactedSize)
+              << std::endl;
+    void *compactedAccel_d;
+    TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&compactedAccel_d, compactedSize), );
+    OptixTraversableHandle compactedAccelHandle;
+    TOY_OPTIX_CHECK_OR_THROW(optixAccelCompact(Context::context,
+                                               0,
+                                               gas.gas,
+                                               (CUdeviceptr)compactedAccel_d,
+                                               compactedSize,
+                                               &compactedAccelHandle), );
+    TOY_CUDA_CHECK_OR_THROW(cudaStreamSynchronize(0), );
+    // free uncompacted accel
+    TOY_CUDA_CHECK_OR_THROW(cudaFree(gas.accel_d), );
+    gas.accel_d = compactedAccel_d;
+    gas.gas = compactedAccelHandle;
+  }
 
   return gas;
 }

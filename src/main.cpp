@@ -168,7 +168,7 @@ int main(int argc, const char **argv) {
   unsigned int frameWidth = 800, frameHeight = 800;
   unsigned int tileWidth = 64, tileHeight = 64;
   float frameResolution = 1000;
-  unsigned int spp = 100000;
+  unsigned int spp = 10000;
   unsigned int maxPathLength = 15;
   auto outputBufferSize = frameWidth * frameHeight * sizeof(float3);
   constexpr unsigned int numStreams = 8;

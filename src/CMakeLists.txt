@@ -10,7 +10,7 @@ get_filename_component(CUDA_LIBRARY_DIR ${CUDA_cudart_static_LIBRARY} DIRECTORY)
 
 # find Optix 7
 if (WIN32)
-  set(OPTIX_7_DEFAULT_INCLUDE_DIR "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.0.0/include")
+  set(OPTIX_7_DEFAULT_INCLUDE_DIR "C:/ProgramData/NVIDIA Corporation/OptiX SDK 7.1.0/include")
 elseif ()
   set(OPTIX_7_DEFAULT_INCLUDE_DIR OPTIX_7_INCLUDE_DIR-NOTFOUND)
 endif ()
