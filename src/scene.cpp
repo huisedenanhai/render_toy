@@ -93,6 +93,118 @@ inline std::shared_ptr<cpptoml::table> load_toml(const fs::path &path) {
   return toml;
 }
 
+namespace ma {
+struct MeshData {
+  std::vector<float> vertices;
+  std::vector<unsigned int> indices;
+};
+
+std::istream &skip_white_space(std::istream &is) {
+  char cur = is.get();
+  while (isspace(cur)) {
+    cur = is.get();
+  }
+  if (is.good()) {
+    is.unget();
+  }
+  return is;
+}
+
+std::string get_token(std::istream &is) {
+  constexpr char oneCharToken[] = {'=', ',', '[', ']'};
+  auto isOneCharToken = [&](char c) {
+    for (auto t : oneCharToken) {
+      if (c == t) {
+        return true;
+      }
+    }
+    return false;
+  };
+  skip_white_space(is);
+  char cur = is.get();
+  if (isOneCharToken(cur)) {
+    char str[] = {cur, 0};
+    return str;
+  }
+
+  std::stringstream ss;
+  while (is && !isOneCharToken(cur) && !isspace(cur)) {
+    ss << cur;
+    cur = is.get();
+  }
+  if (isOneCharToken(cur)) {
+    is.unget();
+  }
+  return ss.str();
+}
+
+void expect_token(const std::string &token, const std::string &expect) {
+  if (token != expect) {
+    throw std::runtime_error("failed to load ma: expect " + expect +
+                             " but got " + token);
+  }
+}
+
+void skip_list(std::ifstream &is) {
+  expect_token(get_token(is), "=");
+  expect_token(get_token(is), "[");
+  while (is && get_token(is) != "]") {
+  }
+}
+
+template <typename T> struct from_string;
+template <> struct from_string<float> {
+  float operator()(const std::string &str) {
+    return std::stof(str);
+  }
+};
+
+template <> struct from_string<unsigned int> {
+  unsigned int operator()(const std::string &str) {
+    return std::stoul(str);
+  }
+};
+
+template <typename T> std::vector<T> load_list(std::ifstream &is) {
+  expect_token(get_token(is), "=");
+  expect_token(get_token(is), "[");
+  std::vector<T> res;
+  while (is) {
+    auto token = get_token(is);
+    if (token == "]") {
+      break;
+    }
+    res.push_back(from_string<T>{}(token));
+    expect_token(get_token(is), ",");
+  }
+  return res;
+}
+
+// we have to implement loading logic of ma file as cpptoml may complain the
+// list is not homogenious, and it handles memory not efficient enough for large
+// data.
+// this method can be called in parallel as long as paths are different
+MeshData load_ma(const fs::path &path) {
+  std::ifstream is(path);
+  MeshData data;
+  while (is) {
+    auto key = get_token(is);
+    if (key == "") {
+      break;
+    }
+    if (key == "vertices") {
+      data.vertices = load_list<float>(is);
+    } else if (key == "indices") {
+      data.indices = load_list<unsigned int>(is);
+    } else {
+      skip_list(is);
+    }
+  }
+  is.close();
+  return data;
+}
+} // namespace ma
+
 Scene SceneLoader::load(const fs::path &sceneToml) {
   auto toml = load_toml(sceneToml);
   Scene scene;
@@ -101,11 +213,20 @@ Scene SceneLoader::load(const fs::path &sceneToml) {
   load_frame(scene.frame, toml->get_table("frame"));
   load_camera(scene.camera, toml->get_table("camera"));
   for (auto &mesh : *toml->get_table_array("mesh")) {
-    std::cout << mesh->get_as<std::string>("file").value_or("fuck")
-              << std::endl;
-    std::cout << mesh->get_as<std::string>(parentDirKey)
-                     .value_or("fuck no parent dir")
-              << std::endl;
+    auto meshPath =
+        fs::path(mesh->get_as<std::string>(parentDirKey).value_or(""));
+    meshPath /= mesh->get_as<std::string>("file").value_or("");
+    auto meshData = ma::load_ma(meshPath);
+    std::cout << "vertices = [" << std::endl;
+    for (auto v : meshData.vertices) {
+      std::cout << v << "," << std::endl;
+    }
+    std::cout << "]" << std::endl;
+    std::cout << "indices = [" << std::endl;
+    for (auto v : meshData.indices) {
+      std::cout << v << "," << std::endl;
+    }
+    std::cout << "]" << std::endl;
   }
   return scene;
 }
