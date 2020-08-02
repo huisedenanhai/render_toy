@@ -38,9 +38,11 @@ add_executable(toy_exe
   scene.cpp
   exceptions.h
   )
+target_compile_features(toy_exe PRIVATE
+  cxx_std_17
+)
 target_include_directories(toy_exe PRIVATE
   ext
-  res
   ${CUDA_INCLUDE_DIRS}
   ${OPTIX_7_INCLUDE_DIR}
   )

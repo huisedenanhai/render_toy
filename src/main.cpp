@@ -1,3 +1,4 @@
+#include "Scene.h"
 #include "context.h"
 #include "exceptions.h"
 #include "pipeline.h"
@@ -166,11 +167,13 @@ int main(int argc, const char **argv) {
     sbt = builder.build();
   }
 
-  unsigned int frameWidth = 800, frameHeight = 800;
-  unsigned int tileWidth = 64, tileHeight = 64;
-  float frameResolution = 1000;
-  unsigned int spp = 10000;
-  unsigned int maxPathLength = 15;
+  auto scene = SceneLoader().load("../scenes/cornell-box/scene.toml");
+
+  unsigned int frameWidth = scene.frame.width, frameHeight = scene.frame.height;
+  unsigned int tileWidth = scene.tile.width, tileHeight = scene.tile.height;
+  float frameResolution = scene.frame.resolution;
+  unsigned int spp = scene.launch.spp;
+  unsigned int maxPathLength = scene.launch.maxPathLength;
   auto outputBufferSize = frameWidth * frameHeight * sizeof(float3);
   constexpr unsigned int numStreams = 8;
 
@@ -192,7 +195,7 @@ int main(int argc, const char **argv) {
     for (int i = 0; i < numStreams; i++) {
       auto &param = launchParams[i];
       auto &camera = param.camera;
-      camera.position = make_float3(0, 1.0f, 5.0f);
+      camera.position = scene.camera.position;
       camera.right = make_float3(1.0f, 0.0f, 0.0f);
       camera.up = make_float3(0.0f, 1.0f, 0.0f);
       camera.back = make_float3(0.0f, 0.0f, 1.0f);
