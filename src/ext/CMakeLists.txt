@@ -1,4 +1,3 @@
 add_subdirectory(cpptoml)
-add_subdirectory(glew)
 add_subdirectory(stb)
 add_subdirectory(tinyobj)

@@ -1,4 +1,19 @@
-[[mesh]]
-file = "CornellBox-Original.obj"
+[launch]
+spp = 100
+maxPathLength = 15
+
+[frame]
+width = 800
+height = 800
+resolution = 1000
+
+[tile]
+width = 64
+height = 64
 
 [camera]
+# camera faces local -z
+position = [0.0, 1.0, 5.0]
+
+[[include]]
+file = "CornellBox-Original.toml"

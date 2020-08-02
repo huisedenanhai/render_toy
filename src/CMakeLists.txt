@@ -20,10 +20,15 @@ if (NOT EXISTS "${OPTIX_7_INCLUDE_DIR}")
   message(FATAL_ERROR "OPTIX_7_INCLUDE_DIR not found: ${OPTIX_7_INCLUDE_DIR}")
 endif ()
 
-# find boost
-set(Boost_USE_STATIC_LIBS ON)
-set(Boost_USE_RELEASE_LIBS ON)
-find_package(Boost 1.70.0 REQUIRED COMPONENTS filesystem)
+add_executable(obj2ma
+  obj2ma.cpp
+  ext/tinyobj/tiny_obj_loader.h
+  ext/tinyobj/tiny_obj_loader.cpp
+)
+
+target_compile_features(obj2ma PRIVATE
+  cxx_std_17
+)
 
 add_executable(toy_exe
   main.cpp
@@ -38,17 +43,13 @@ target_include_directories(toy_exe PRIVATE
   res
   ${CUDA_INCLUDE_DIRS}
   ${OPTIX_7_INCLUDE_DIR}
-  ${Boost_INCLUDE_DIR}
   )
 target_link_directories(toy_exe PRIVATE
   ${CUDA_LIBRARY_DIR}
-  ${Boost_LIBRARY_DIR_RELEASE}
   )
 target_link_libraries(toy_exe PRIVATE
   cuda
   cudart
-  nvrtc
-  Boost::filesystem
   )
 
 #######################################
@@ -77,41 +78,5 @@ add_custom_target(toy ALL
   COMMENT "copy ptx to exe dir"
   )
 add_dependencies(toy toy_ptx)
-
-option(ENABLE_LIVE_PREVIEW "live preview rendering process with opengl window" ON)
-if (${ENABLE_LIVE_PREVIEW})
-  target_compile_definitions(toy_exe PRIVATE
-    -DENABLE_LIVE_PREVIEW
-    )
-  #######################################
-  # other dependencies for live preview
-  #######################################
-  # find opengl
-  find_package(OpenGL REQUIRED)
-
-  target_include_directories(toy_exe PRIVATE
-    ${OPENGL_INCLUDE_DIR}
-    )
-  target_link_libraries(toy_exe PRIVATE
-    OpenGL::GL
-    )
-
-  # find GLFW
-  set(GLFW_INCLUDE_DIR "GLFW_INCLUDE_DIR-NOTFOUND" CACHE PATH "include directory of glfw")
-  set(GLFW_STATIC_LIB "GLFW_STATIC_LIB-NOTFOUND" CACHE FILEPATH "glfw static library")
-  if (NOT EXISTS ${GLFW_INCLUDE_DIR})
-    message(FATAL_ERROR "GLFW_INCLUDE_DIR ${GLFW_INCLUDE_DIR} not exist")
-  endif ()
-  if (NOT EXISTS ${GLFW_STATIC_LIB})
-    message(FATAL_ERROR "GLFW_STATIC_LIB ${GLFW_STATIC_LIB} not exist")
-  endif ()
-
-  target_include_directories(toy_exe PRIVATE
-    ${GLFW_INCLUDE_DIR}
-    )
-  target_link_libraries(toy_exe PRIVATE
-    ${GLFW_STATIC_LIB}
-    )
-endif ()
 
 add_subdirectory(ext)

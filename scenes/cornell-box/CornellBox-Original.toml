@@ -1,0 +1,72 @@
+[[material]]
+id = "leftWall.fbb4237f-4521-a394-a3a2-7dd5316613a4"
+baseColor = [0.630000, 0.065000, 0.050000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "rightWall.18cab6a1-59ff-ed26-05b2-2e8755459f7b"
+baseColor = [0.140000, 0.450000, 0.091000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "floor.e5fc62e8-3d31-438e-7804-278e4fc39968"
+baseColor = [0.725000, 0.710000, 0.680000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "ceiling.2f91e2dd-dc15-4f81-631c-03181ac6863c"
+baseColor = [0.725000, 0.710000, 0.680000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "backWall.e115d6f1-333f-5752-f98f-b3edc4c04df0"
+baseColor = [0.725000, 0.710000, 0.680000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "shortBox.a6716a56-3503-5842-8d77-4c71f2aed605"
+baseColor = [0.725000, 0.710000, 0.680000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "tallBox.32e4461a-6e48-c22c-66ee-bd5b15fef661"
+baseColor = [0.725000, 0.710000, 0.680000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "light.7dcb178e-c780-e1b6-db71-9756417434dd"
+baseColor = [0.780000, 0.780000, 0.780000]
+emission = [17.000000, 12.000000, 4.000000]
+
+[[mesh]]
+file = "components\\floor.05898a9d-c605-2e4a-f0c0-04b5b443e40c.ma"
+material = "floor.e5fc62e8-3d31-438e-7804-278e4fc39968"
+
+[[mesh]]
+file = "components\\ceiling.7f3305db-9c38-9f3c-643d-d26748750e97.ma"
+material = "ceiling.2f91e2dd-dc15-4f81-631c-03181ac6863c"
+
+[[mesh]]
+file = "components\\backWall.6ec0e67a-0ddb-e6da-7d14-609f08cde42f.ma"
+material = "backWall.e115d6f1-333f-5752-f98f-b3edc4c04df0"
+
+[[mesh]]
+file = "components\\rightWall.1bd7d011-ca70-f361-3611-9d916a9e5d0a.ma"
+material = "rightWall.18cab6a1-59ff-ed26-05b2-2e8755459f7b"
+
+[[mesh]]
+file = "components\\leftWall.bb35713d-047e-aac9-a35f-283b7662b131.ma"
+material = "leftWall.fbb4237f-4521-a394-a3a2-7dd5316613a4"
+
+[[mesh]]
+file = "components\\leftWall.3a5b65f4-23f0-53b9-eddf-8f2d3a6a416e.ma"
+material = "shortBox.a6716a56-3503-5842-8d77-4c71f2aed605"
+
+[[mesh]]
+file = "components\\shortBox.16277132-1183-c04a-21f9-162934fa80ef.ma"
+material = "tallBox.32e4461a-6e48-c22c-66ee-bd5b15fef661"
+
+[[mesh]]
+file = "components\\light.07803fae-c660-3103-aa23-e067c30451a2.ma"
+material = "light.7dcb178e-c780-e1b6-db71-9756417434dd"
+
