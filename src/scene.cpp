@@ -1,6 +1,7 @@
 #include "scene.h"
 #include <cpptoml/cpptoml.h>
 #include <iostream>
+#include <unordered_map>
 
 template <typename T>
 inline T get_value_required(const std::shared_ptr<cpptoml::table> &table,
@@ -241,34 +242,64 @@ inline void build_sbt(Scene &scene,
   scene.sbt = builder.build();
 }
 
-Scene SceneLoader::load(const fs::path &sceneToml, IIntegrator &integrator) {
-  auto toml = load_toml(sceneToml);
-  Scene scene;
-  load_launch(scene.launch, toml->get_table("launch"));
-  load_tile(scene.tile, toml->get_table("tile"));
-  load_frame(scene.frame, toml->get_table("frame"));
-  load_camera(scene.camera, toml->get_table("camera"));
-  build_sbt(scene, integrator, toml);
+// same hash from glm
+namespace {
+void hash_combine(size_t &seed, size_t hash) {
+  hash += 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= hash;
+}
+} // namespace
 
+namespace std {
+template <> struct hash<float3> {
+  size_t operator()(const float3 &v) const {
+    size_t seed = 0;
+    hash<float> hasher;
+    hash_combine(seed, hasher(v.x));
+    hash_combine(seed, hasher(v.y));
+    hash_combine(seed, hasher(v.z));
+    return seed;
+  }
+};
+} // namespace std
+
+bool operator==(const float3 &lhs, const float3 &rhs) {
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
+inline void build_gas(Scene &scene,
+                      const std::shared_ptr<cpptoml::table> &toml) {
   auto meshes = toml->get_table_array("mesh");
   if (!meshes) {
     throw std::runtime_error("scene file has no mesh data");
   }
+  std::unordered_map<float3, uint32_t> uniqueVertices;
   std::vector<float> vertices;
   std::vector<unsigned int> indices;
   std::vector<unsigned int> materialIds;
   unsigned int matCount = 0;
+  unsigned int rawVertexCount = 0;
   for (auto &mesh : *meshes) {
     auto meshPath =
         fs::path(mesh->get_as<std::string>(parentDirKey).value_or(""));
     meshPath /= mesh->get_as<std::string>("file").value_or("");
     auto meshData = ma::load_ma(meshPath);
-    // trivially insert all vertices and indices
-    auto indexOffset = vertices.size() / 3;
-    vertices.insert(
-        vertices.end(), meshData.vertices.begin(), meshData.vertices.end());
+    rawVertexCount += meshData.vertices.size();
     for (auto index : meshData.indices) {
-      indices.push_back(index + indexOffset);
+      float3 vertex = make_float3(meshData.vertices[3 * index],
+                                  meshData.vertices[3 * index + 1],
+                                  meshData.vertices[3 * index + 2]);
+      unsigned int modifiedIndex = 0;
+      if (uniqueVertices.count(vertex) == 0) {
+        modifiedIndex = vertices.size() / 3;
+        uniqueVertices[vertex] = modifiedIndex;
+        vertices.push_back(vertex.x);
+        vertices.push_back(vertex.y);
+        vertices.push_back(vertex.z);
+      } else {
+        modifiedIndex = uniqueVertices[vertex];
+      }
+      indices.push_back(modifiedIndex);
     }
     auto matId = scene.materialIndices[mesh->get_as<std::string>("material")
                                            .value_or("default")];
@@ -277,6 +308,8 @@ Scene SceneLoader::load(const fs::path &sceneToml, IIntegrator &integrator) {
       materialIds.push_back(matId);
     }
   }
+  std::cout << "raw vertex count: " << rawVertexCount
+            << ", unique vertex count: " << uniqueVertices.size() << std::endl;
   GASBuilder builder;
   builder.vertices = &vertices[0];
   builder.vertexCount = vertices.size() / 3;
@@ -285,5 +318,16 @@ Scene SceneLoader::load(const fs::path &sceneToml, IIntegrator &integrator) {
   builder.primitiveCount = indices.size() / 3;
   builder.materialCount = matCount;
   scene.gas = builder.build();
+}
+
+Scene SceneLoader::load(const fs::path &sceneToml, IIntegrator &integrator) {
+  auto toml = load_toml(sceneToml);
+  Scene scene;
+  load_launch(scene.launch, toml->get_table("launch"));
+  load_tile(scene.tile, toml->get_table("tile"));
+  load_frame(scene.frame, toml->get_table("frame"));
+  load_camera(scene.camera, toml->get_table("camera"));
+  build_sbt(scene, integrator, toml);
+  build_gas(scene, toml);
   return scene;
 }
