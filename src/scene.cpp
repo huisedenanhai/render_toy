@@ -284,7 +284,7 @@ inline void build_gas(Scene &scene,
         fs::path(mesh->get_as<std::string>(parentDirKey).value_or(""));
     meshPath /= mesh->get_as<std::string>("file").value_or("");
     auto meshData = ma::load_ma(meshPath);
-    rawVertexCount += meshData.vertices.size();
+    rawVertexCount += meshData.vertices.size() / 3;
     for (auto index : meshData.indices) {
       float3 vertex = make_float3(meshData.vertices[3 * index],
                                   meshData.vertices[3 * index + 1],
