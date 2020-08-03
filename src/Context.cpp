@@ -349,7 +349,7 @@ ShaderBindingTable ShaderBindingTableBuilder::build() {
       void *buf_d = (void *)((char *)sbt.sbtBuffers_d[i] + ri * stride);
       TOY_CUDA_CHECK_OR_THROW(
           cudaMemcpy(
-              buf_d, record.record, record.size, cudaMemcpyHostToDevice), );
+              buf_d, record.record.get(), record.size, cudaMemcpyHostToDevice), );
     }
   }
 
@@ -372,14 +372,6 @@ ShaderBindingTable ShaderBindingTableBuilder::build() {
   sbt.sbt.callablesRecordStrideInBytes = 0;
   sbt.sbt.callablesRecordCount = 0;
   return sbt;
-}
-
-ShaderBindingTableBuilder::~ShaderBindingTableBuilder() {
-  for (auto &record : records) {
-    for (auto &r : record) {
-      r.destroy();
-    }
-  }
 }
 
 inline std::string pretty_format_bytes(size_t size) {

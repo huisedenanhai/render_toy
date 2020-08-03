@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+constexpr float Pi = 3.1415926f;
 
 struct Config {
   fs::path objFile;
@@ -307,6 +308,10 @@ int main(int argc, char **argv) {
       Material material;
       memcpy(material.baseColor, mat.diffuse, 3 * sizeof(float));
       memcpy(material.emission, mat.emission, 3 * sizeof(float));
+      // scale emission to let it use radiance as unit
+      for (int i = 0; i < 3; i++) {
+        material.emission[i] *= Pi;
+      }
       material.id = gen_unique_name(mat.name);
       model.materials.push_back(material);
     }

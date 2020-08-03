@@ -1,5 +1,8 @@
 #pragma once
+#include "context.h"
+#include "integrator.h"
 #include <filesystem>
+#include <map>
 #include <vector_functions.h>
 #include <vector_types.h>
 
@@ -30,8 +33,11 @@ struct Scene {
   Frame frame;
   Tile tile;
   Camera camera;
+  std::map<std::string, unsigned int> materialIndices;
+  ShaderBindingTable sbt;
+  GAS gas;
 };
 
 struct SceneLoader {
-  Scene load(const fs::path &sceneToml);
+  Scene load(const fs::path &sceneToml, IIntegrator &integrator);
 };

@@ -125,14 +125,45 @@ struct ShaderBindingTable {
   void destroy();
 };
 
+struct IDeleter {
+  virtual void destroy(void *ptr) = 0;
+  virtual ~IDeleter() {}
+};
+
+template <typename T> struct Deleter : public IDeleter {
+  virtual void destroy(void *ptr) override {
+    delete (T *)ptr;
+  }
+};
+
+struct GenericDeleter {
+  template <typename T>
+  explicit GenericDeleter(std::unique_ptr<Deleter<T>> d)
+      : deleter(std::move(d)) {}
+  GenericDeleter() : deleter(nullptr) {}
+  void operator()(void *ptr) {
+    if (deleter && ptr) {
+      deleter->destroy(ptr);
+    }
+  }
+  std::unique_ptr<IDeleter> deleter;
+};
+
 struct ShaderBindingTableBuilder {
   struct RecordHandle {
-    void *record;
-    size_t size;
+    RecordHandle() : record(nullptr, GenericDeleter()), size(0) {}
+    template <typename T>
+    RecordHandle(T *ptr)
+        : record(ptr, GenericDeleter(std::make_unique<Deleter<T>>())),
+          size(sizeof(T)) {}
+    RecordHandle(const RecordHandle &) = delete;
+    RecordHandle(RecordHandle &&) = default;
+    RecordHandle &operator=(const RecordHandle &) = delete;
+    RecordHandle &operator=(RecordHandle &&) = default;
+    ~RecordHandle() = default;
 
-    void destroy() {
-      delete record;
-    }
+    std::unique_ptr<void, GenericDeleter> record;
+    size_t size;
   };
 
   // the pipeline must be fully built
@@ -143,12 +174,12 @@ struct ShaderBindingTableBuilder {
     }
   }
   ShaderBindingTableBuilder(const ShaderBindingTableBuilder &) = delete;
-  ShaderBindingTableBuilder(ShaderBindingTableBuilder &&) = delete;
+  ShaderBindingTableBuilder(ShaderBindingTableBuilder &&) = default;
   ShaderBindingTableBuilder &
   operator=(const ShaderBindingTableBuilder &) = delete;
-  ShaderBindingTableBuilder &operator=(ShaderBindingTableBuilder &&) = delete;
+  ShaderBindingTableBuilder &operator=(ShaderBindingTableBuilder &&) = default;
 
-  ~ShaderBindingTableBuilder();
+  ~ShaderBindingTableBuilder() = default;
 
   template <typename T>
   T *add_record(unsigned int groupIndex, unsigned int index) {
@@ -157,10 +188,7 @@ struct ShaderBindingTableBuilder {
         optixSbtRecordPackHeader(pipeline->groups[groupIndex][index],
                                  record), );
 
-    RecordHandle handle{};
-    handle.record = record;
-    handle.size = sizeof(Record<T>);
-    records[groupIndex].push_back(handle);
+    records[groupIndex].emplace_back(record);
     return &record->data;
   }
 

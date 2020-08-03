@@ -2,6 +2,18 @@
 #include <cpptoml/cpptoml.h>
 #include <iostream>
 
+template <typename T>
+inline T get_value_required(const std::shared_ptr<cpptoml::table> &table,
+                            const std::string &key,
+                            const std::string &tableName) {
+  auto v = table->get_as<T>(key);
+  if (!v) {
+    throw std::runtime_error("value for \"" + tableName + "." + key +
+                             "\" is required");
+  }
+  return *v;
+}
+
 inline void load_launch(Scene::Launch &launch,
                         const std::shared_ptr<cpptoml::table> &table) {
   if (!table) {
@@ -205,28 +217,73 @@ MeshData load_ma(const fs::path &path) {
 }
 } // namespace ma
 
-Scene SceneLoader::load(const fs::path &sceneToml) {
+inline void build_sbt(Scene &scene,
+                      IIntegrator &integrator,
+                      const std::shared_ptr<cpptoml::table> &toml) {
+  auto builder = integrator.get_stb_builder();
+  // always add a default material
+  auto &defaultMat = integrator.materials.at("default");
+  defaultMat.material->add_hit_record(builder, defaultMat.index, nullptr);
+  scene.materialIndices["default"] = 0;
+  unsigned int materialIndex = 1;
+  auto mats = toml->get_table_array("material");
+  if (mats) {
+    for (auto data : *mats) {
+      auto id = get_value_required<std::string>(data, "id", "material");
+      auto type = data->get_as<std::string>("type").value_or("default");
+      auto matIt = integrator.materials.find("type");
+      auto &mat =
+          matIt == integrator.materials.end() ? defaultMat : matIt->second;
+      mat.material->add_hit_record(builder, mat.index, data);
+      scene.materialIndices[id] = materialIndex++;
+    }
+  }
+  scene.sbt = builder.build();
+}
+
+Scene SceneLoader::load(const fs::path &sceneToml, IIntegrator &integrator) {
   auto toml = load_toml(sceneToml);
   Scene scene;
   load_launch(scene.launch, toml->get_table("launch"));
   load_tile(scene.tile, toml->get_table("tile"));
   load_frame(scene.frame, toml->get_table("frame"));
   load_camera(scene.camera, toml->get_table("camera"));
-  for (auto &mesh : *toml->get_table_array("mesh")) {
+  build_sbt(scene, integrator, toml);
+
+  auto meshes = toml->get_table_array("mesh");
+  if (!meshes) {
+    throw std::runtime_error("scene file has no mesh data");
+  }
+  std::vector<float> vertices;
+  std::vector<unsigned int> indices;
+  std::vector<unsigned int> materialIds;
+  unsigned int matCount = 0;
+  for (auto &mesh : *meshes) {
     auto meshPath =
         fs::path(mesh->get_as<std::string>(parentDirKey).value_or(""));
     meshPath /= mesh->get_as<std::string>("file").value_or("");
     auto meshData = ma::load_ma(meshPath);
-    std::cout << "vertices = [" << std::endl;
-    for (auto v : meshData.vertices) {
-      std::cout << v << "," << std::endl;
+    // trivially insert all vertices and indices
+    auto indexOffset = vertices.size() / 3;
+    vertices.insert(
+        vertices.end(), meshData.vertices.begin(), meshData.vertices.end());
+    for (auto index : meshData.indices) {
+      indices.push_back(index + indexOffset);
     }
-    std::cout << "]" << std::endl;
-    std::cout << "indices = [" << std::endl;
-    for (auto v : meshData.indices) {
-      std::cout << v << "," << std::endl;
+    auto matId = scene.materialIndices[mesh->get_as<std::string>("material")
+                                           .value_or("default")];
+    matCount = std::max(matId + 1, matCount);
+    for (int i = 0; i < meshData.indices.size() / 3; i++) {
+      materialIds.push_back(matId);
     }
-    std::cout << "]" << std::endl;
   }
+  GASBuilder builder;
+  builder.vertices = &vertices[0];
+  builder.vertexCount = vertices.size() / 3;
+  builder.indices = &indices[0];
+  builder.materialIds = &materialIds[0];
+  builder.primitiveCount = indices.size() / 3;
+  builder.materialCount = matCount;
+  scene.gas = builder.build();
   return scene;
 }

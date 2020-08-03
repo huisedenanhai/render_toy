@@ -36,6 +36,10 @@ add_executable(toy_exe
   context.cpp
   scene.h
   scene.cpp
+  integrator.h
+  integrator.cpp
+  path_tracing.h
+  path_tracing.cpp
   exceptions.h
   )
 target_compile_features(toy_exe PRIVATE

@@ -1,6 +1,7 @@
 #include "Scene.h"
 #include "context.h"
 #include "exceptions.h"
+#include "path_tracing.h"
 #include "pipeline.h"
 #include "vec_math.h"
 #include <algorithm>
@@ -39,135 +40,12 @@ int main(int argc, const char **argv) {
     printf("no input file specified, stop.");
     return 0;
   }
+  std::string inputFile = argv[1];
   // init optix
   Context::init();
-
-  // load obj
-  tinyobj::attrib_t attrib;
-  std::vector<tinyobj::shape_t> shapes;
-  std::vector<tinyobj::material_t> materials;
-  {
-    const char *inputFile = argv[1];
-    std::cout << "start load obj file: " << inputFile << std::endl;
-    auto materialBaseDir = parent_dir(inputFile, true);
-    std::string loadError;
-    if (!tinyobj::LoadObj(&attrib,
-                          &shapes,
-                          &materials,
-                          &loadError,
-                          inputFile,
-                          materialBaseDir.c_str(),
-                          true)) {
-      std::cerr << "failed to load obj file: " << loadError << std::endl;
-      return -1;
-    } else {
-      std::cout << "finish load obj file " << inputFile;
-      if (!loadError.empty()) {
-        std::cout << " with info:\n" << loadError;
-      }
-      std::cout << std::endl;
-    }
-  }
-  static_assert(std::is_same_v<tinyobj::real_t, float>,
-                "only float data is supported");
-
-  GASBuilder gasBuilder;
-  gasBuilder.vertices = &attrib.vertices[0];
-  gasBuilder.vertexCount = attrib.vertices.size() / 3;
-
-  // should be multiple of 3
-  int indicesCnt = 0;
-  auto shapeCnt = shapes.size();
-  for (const auto &shape : shapes) {
-    indicesCnt += shape.mesh.indices.size();
-  }
-  assert(indicesCnt % 3 == 0);
-  auto indices_h = std::make_unique<unsigned int[]>(indicesCnt);
-  int index = 0;
-  for (const auto &shape : shapes) {
-    for (const auto &indice : shape.mesh.indices) {
-      indices_h[index++] = indice.vertex_index;
-    }
-  }
-
-  gasBuilder.indices = indices_h.get();
-  gasBuilder.primitiveCount = indicesCnt / 3;
-
-  // transform material data to target format
-  // 0 if use default material
-  int materialCnt = materials.size();
-  std::vector<dev::HitGroupData> hitRecords(materialCnt == 0 ? 1 : materialCnt);
-  if (materialCnt == 0) {
-    // default material
-    hitRecords[0].baseColor = make_float3(0.5f, 0.5f, 0.5f);
-    hitRecords[0].emission = make_float3(0, 0, 0);
-  } else {
-    for (int i = 0; i < materialCnt; i++) {
-      auto &data = hitRecords[i];
-      const auto &mat = materials[i];
-      data.baseColor =
-          make_float3(mat.diffuse[0], mat.diffuse[1], mat.diffuse[2]);
-      data.emission =
-          make_float3(mat.emission[0], mat.emission[1], mat.emission[2]) * Pi;
-      printf("mat %s {\n", mat.name.c_str());
-      printf("  color = (%f, %f, %f)\n",
-             data.baseColor.x,
-             data.baseColor.y,
-             data.baseColor.z);
-      printf("  emission = (%f, %f, %f)\n",
-             data.emission.x,
-             data.emission.y,
-             data.emission.z);
-      printf("}\n");
-    }
-  }
-
-  // per primitive material indices
-  auto matIds = std::make_unique<unsigned int[]>(gasBuilder.primitiveCount);
-  int faceCnt = 0;
-  if (materialCnt > 1) {
-    for (const auto &shape : shapes) {
-      const auto &mats = shape.mesh.material_ids;
-      memcpy(matIds.get() + faceCnt, mats.data(), mats.size() * sizeof(int));
-      faceCnt += mats.size();
-    }
-    assert(faceCnt == gasBuilder.primitiveCount);
-  } else {
-    memset(matIds.get(), 0, gasBuilder.primitiveCount * sizeof(unsigned int));
-  }
-  gasBuilder.materialIds = matIds.get();
-  gasBuilder.materialCount = materialCnt == 0 ? 1 : materialCnt;
-
-  // build accel
-  auto gas = gasBuilder.build();
-  // assemble pipeline
-  auto moduleName = "pipeline.ptx";
-  auto pipeline =
-      PipelineBuilder()
-          .set_launch_params("g_LaunchParams")
-          .add_raygen_group(moduleName, "__raygen__entry")
-          .add_miss_group(moduleName, "__miss__entry")
-          .add_exception_group(moduleName, "__exception__entry")
-          .add_hit_group(
-              moduleName, "__closesthit__entry", moduleName, "__anyhit__entry")
-          .build();
-  // set up sbt
-  ShaderBindingTable sbt;
-  {
-    ShaderBindingTableBuilder builder(&pipeline);
-    builder.add_raygen_record<dev::RayGenData>(0);
-    auto exceptionRecord = builder.add_exception_record<dev::ExceptionData>(0);
-    exceptionRecord->errorColor = make_float3(0, 1.0f, 0);
-    auto missRecord = builder.add_miss_record<dev::MissData>(0);
-    missRecord->color = make_float3(0.0f, 0.0f, 0.0f);
-    for (auto &record : hitRecords) {
-      auto hitRecord = builder.add_hit_record<dev::HitGroupData>(0);
-      *hitRecord = record;
-    }
-    sbt = builder.build();
-  }
-
-  auto scene = SceneLoader().load("../scenes/cornell-box/scene.toml");
+  auto integrator = PathIntegratorBuilder().build();
+  auto scene =
+      SceneLoader().load(inputFile, *integrator);
 
   unsigned int frameWidth = scene.frame.width, frameHeight = scene.frame.height;
   unsigned int tileWidth = scene.tile.width, tileHeight = scene.tile.height;
@@ -209,11 +87,11 @@ int main(int argc, const char **argv) {
       frame.height = frameHeight;
       frame.buffer = (float3 *)outputFrameBuffer.ptr;
 
-      auto &scene = param.scene;
-      scene.gas = gas.gas;
-      scene.epsilon = 1e-5;
-      scene.extent =
-          gas.aabb.extend(camera.position).get_bouding_sphere().radius * 2.0f +
+      param.scene.gas = scene.gas.gas;
+      param.scene.epsilon = 1e-5;
+      param.scene.extent =
+          scene.gas.aabb.extend(camera.position).get_bouding_sphere().radius *
+              2.0f +
           5.0f;
 
       param.spp = spp;
@@ -254,11 +132,11 @@ int main(int argc, const char **argv) {
 
           // launch size should match exactly with cropped size of the ouput
           // frame
-          TOY_OPTIX_CHECK_OR_THROW(optixLaunch(pipeline.pipeline,
+          TOY_OPTIX_CHECK_OR_THROW(optixLaunch(integrator->pipeline.pipeline,
                                                stream,
                                                (CUdeviceptr)paramPtrD,
                                                sizeof(dev::LaunchParams),
-                                               &sbt.sbt,
+                                               &scene.sbt.sbt,
                                                launchWidth,
                                                launchHeight,
                                                1), );

@@ -1,72 +1,72 @@
 [[material]]
-id = "leftWall.fbb4237f-4521-a394-a3a2-7dd5316613a4"
+id = "leftWall.6ef4b344-5a5b-4741-19b6-4d4222d9528e"
 baseColor = [0.630000, 0.065000, 0.050000]
 emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
-id = "rightWall.18cab6a1-59ff-ed26-05b2-2e8755459f7b"
+id = "rightWall.b1c73d80-d318-f217-e5c0-864426e25216"
 baseColor = [0.140000, 0.450000, 0.091000]
 emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
-id = "floor.e5fc62e8-3d31-438e-7804-278e4fc39968"
+id = "floor.e9b1f5d0-fb60-6960-f876-69581a589ae7"
 baseColor = [0.725000, 0.710000, 0.680000]
 emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
-id = "ceiling.2f91e2dd-dc15-4f81-631c-03181ac6863c"
+id = "ceiling.c59cd1dc-463d-eb49-f215-bf4ce74d9f40"
 baseColor = [0.725000, 0.710000, 0.680000]
 emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
-id = "backWall.e115d6f1-333f-5752-f98f-b3edc4c04df0"
+id = "backWall.35e85b35-3026-35b3-eab6-496cdf5f94a5"
 baseColor = [0.725000, 0.710000, 0.680000]
 emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
-id = "shortBox.a6716a56-3503-5842-8d77-4c71f2aed605"
+id = "shortBox.618c5df8-e207-e3e1-f666-449683a17af1"
 baseColor = [0.725000, 0.710000, 0.680000]
 emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
-id = "tallBox.32e4461a-6e48-c22c-66ee-bd5b15fef661"
+id = "tallBox.20c2ccea-aec8-91bb-8002-800a667d44b6"
 baseColor = [0.725000, 0.710000, 0.680000]
 emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
-id = "light.7dcb178e-c780-e1b6-db71-9756417434dd"
+id = "light.9cafcdb7-3c87-27f9-cea3-25661046feb2"
 baseColor = [0.780000, 0.780000, 0.780000]
-emission = [17.000000, 12.000000, 4.000000]
+emission = [53.407074, 37.699112, 12.566370]
 
 [[mesh]]
-file = "components\\floor.05898a9d-c605-2e4a-f0c0-04b5b443e40c.ma"
-material = "floor.e5fc62e8-3d31-438e-7804-278e4fc39968"
+file = "components\\floor.4213df6e-cb14-a5b6-8481-124faad2f4c2.ma"
+material = "floor.e9b1f5d0-fb60-6960-f876-69581a589ae7"
 
 [[mesh]]
-file = "components\\ceiling.7f3305db-9c38-9f3c-643d-d26748750e97.ma"
-material = "ceiling.2f91e2dd-dc15-4f81-631c-03181ac6863c"
+file = "components\\ceiling.0a348dfc-63bb-d5de-75c4-4d26e107d181.ma"
+material = "ceiling.c59cd1dc-463d-eb49-f215-bf4ce74d9f40"
 
 [[mesh]]
-file = "components\\backWall.6ec0e67a-0ddb-e6da-7d14-609f08cde42f.ma"
-material = "backWall.e115d6f1-333f-5752-f98f-b3edc4c04df0"
+file = "components\\backWall.0a9b7a39-4856-e9a9-60d8-03a0038ea2a1.ma"
+material = "backWall.35e85b35-3026-35b3-eab6-496cdf5f94a5"
 
 [[mesh]]
-file = "components\\rightWall.1bd7d011-ca70-f361-3611-9d916a9e5d0a.ma"
-material = "rightWall.18cab6a1-59ff-ed26-05b2-2e8755459f7b"
+file = "components\\rightWall.f5af652a-de74-619f-9be6-5da631eb5390.ma"
+material = "rightWall.b1c73d80-d318-f217-e5c0-864426e25216"
 
 [[mesh]]
-file = "components\\leftWall.bb35713d-047e-aac9-a35f-283b7662b131.ma"
-material = "leftWall.fbb4237f-4521-a394-a3a2-7dd5316613a4"
+file = "components\\leftWall.e31027dd-fd76-a92b-dacb-7e6df1485616.ma"
+material = "leftWall.6ef4b344-5a5b-4741-19b6-4d4222d9528e"
 
 [[mesh]]
-file = "components\\leftWall.3a5b65f4-23f0-53b9-eddf-8f2d3a6a416e.ma"
-material = "shortBox.a6716a56-3503-5842-8d77-4c71f2aed605"
+file = "components\\leftWall.c144d7c9-8b0d-f5cb-c103-8273055097c8.ma"
+material = "shortBox.618c5df8-e207-e3e1-f666-449683a17af1"
 
 [[mesh]]
-file = "components\\shortBox.16277132-1183-c04a-21f9-162934fa80ef.ma"
-material = "tallBox.32e4461a-6e48-c22c-66ee-bd5b15fef661"
+file = "components\\shortBox.5c72aef6-8ff9-1cfe-0292-62a43de0c3aa.ma"
+material = "tallBox.20c2ccea-aec8-91bb-8002-800a667d44b6"
 
 [[mesh]]
-file = "components\\light.07803fae-c660-3103-aa23-e067c30451a2.ma"
-material = "light.7dcb178e-c780-e1b6-db71-9756417434dd"
+file = "components\\light.0e4935ea-a033-d940-d338-0bd2938c8f04.ma"
+material = "light.9cafcdb7-3c87-27f9-cea3-25661046feb2"
 
