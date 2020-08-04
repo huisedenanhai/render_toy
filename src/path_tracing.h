@@ -2,7 +2,15 @@
 
 #include "integrator.h"
 
-class PathDefaultMaterial : public IMaterial {
+class PathDiffuseMaterial : public IMaterial {
+public:
+  virtual void
+  add_hit_record(ShaderBindingTableBuilder &builder,
+                 unsigned int index,
+                 const std::shared_ptr<cpptoml::table> &data) override;
+};
+
+class PathGlassMaterial : public IMaterial {
 public:
   virtual void
   add_hit_record(ShaderBindingTableBuilder &builder,

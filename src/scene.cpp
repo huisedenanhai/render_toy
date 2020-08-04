@@ -232,7 +232,7 @@ inline void build_sbt(Scene &scene,
     for (auto data : *mats) {
       auto id = get_value_required<std::string>(data, "id", "material");
       auto type = data->get_as<std::string>("type").value_or("default");
-      auto matIt = integrator.materials.find("type");
+      auto matIt = integrator.materials.find(type);
       auto &mat =
           matIt == integrator.materials.end() ? defaultMat : matIt->second;
       mat.material->add_hit_record(builder, mat.index, data);

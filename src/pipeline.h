@@ -96,8 +96,13 @@ struct MissData {
   float3 color;
 };
 
-struct HitGroupData {
+struct DiffuseHitGroupData {
   float3 baseColor;
   float3 emission;
+};
+
+struct GlassHitGroupData {
+  float3 baseColor;
+  float ior;
 };
 } // namespace dev
