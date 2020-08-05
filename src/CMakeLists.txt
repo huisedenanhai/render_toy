@@ -22,12 +22,14 @@ endif ()
 
 add_executable(obj2ma
   obj2ma.cpp
-  ext/tinyobj/tiny_obj_loader.h
-  ext/tinyobj/tiny_obj_loader.cpp
 )
 
 target_compile_features(obj2ma PRIVATE
   cxx_std_17
+)
+
+target_include_directories(obj2ma PRIVATE
+  ${CMAKE_SOURCE_DIR}/ext
 )
 
 add_executable(toy_exe
@@ -46,7 +48,7 @@ target_compile_features(toy_exe PRIVATE
   cxx_std_17
 )
 target_include_directories(toy_exe PRIVATE
-  ext
+  ${CMAKE_SOURCE_DIR}/ext
   ${CUDA_INCLUDE_DIRS}
   ${OPTIX_7_INCLUDE_DIR}
   )
@@ -84,5 +86,3 @@ add_custom_target(toy ALL
   COMMENT "copy ptx to exe dir"
   )
 add_dependencies(toy toy_ptx)
-
-add_subdirectory(ext)

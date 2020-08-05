@@ -56,6 +56,7 @@ sample_camera_ray(unsigned int &randState, float3 &origin, float3 &direction) {
   return 1.0f; // w / pdf
 }
 
+// forms a xyz right hand coord
 struct OthoBase {
   float3 x;
   float3 y;
@@ -73,6 +74,7 @@ struct TangentSpace {
   float3 n;
 
   // n aligns with y
+  // assume n is normalized, and perpendicular to both dpdu and dpdv
   __device__ __forceinline__ OthoBase get_otho_base() {
     OthoBase base;
     base.x = normalize(dpdu);
