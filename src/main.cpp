@@ -44,8 +44,7 @@ int main(int argc, const char **argv) {
   // init optix
   Context::init();
   auto integrator = PathIntegratorBuilder().build();
-  auto scene =
-      SceneLoader().load(inputFile, *integrator);
+  auto scene = SceneLoader().load(inputFile, *integrator);
 
   unsigned int frameWidth = scene.frame.width, frameHeight = scene.frame.height;
   unsigned int tileWidth = scene.tile.width, tileHeight = scene.tile.height;
@@ -172,6 +171,9 @@ int main(int argc, const char **argv) {
                                        cudaMemcpyDeviceToHost), );
     auto resultAsBytes = std::make_unique<unsigned char[]>(elemCnt);
     auto convertPixel = [](float v) {
+      // convert to sRGB
+      v = powf(v, 1.0f / 2.2f);
+      v *= 255;
       if (v < 0) {
         v = 0;
       }
@@ -181,7 +183,7 @@ int main(int argc, const char **argv) {
       return (unsigned char)(v);
     };
     for (int i = 0; i < elemCnt; i++) {
-      resultAsBytes[i] = convertPixel(255 * result[i]);
+      resultAsBytes[i] = convertPixel(result[i]);
     }
     stbi_flip_vertically_on_write(1);
     stbi_write_png(

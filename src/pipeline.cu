@@ -65,6 +65,10 @@ struct OthoBase {
   __device__ __forceinline__ float3 local_to_world_dir(float3 d) {
     return x * d.x + y * d.y + z * d.z;
   }
+
+  __device__ __forceinline__ float3 world_to_local_dir(float3 d) {
+    return make_float3(dot(d, x), dot(d, y), dot(d, z));
+  }
 };
 
 struct TangentSpace {
@@ -260,30 +264,53 @@ extern "C" __device__ void __closesthit__diffuse() {
 
 extern "C" __device__ void __anyhit__diffuse() {}
 
+__device__ __forceinline__ float
+fresnel_parrallel(float cosI, float cosT, float nT) {
+  auto r = (nT * cosI - cosT) / (nT * cosI + cosT);
+  return r * r;
+}
+
+__device__ __forceinline__ float
+fresnel_perpendicular(float cosI, float cosT, float nT) {
+  auto r = (cosI - nT * cosT) / (cosI + nT * cosT);
+  return r * r;
+}
+
+__device__ __forceinline__ float fresnel(float cosI, float cosT, float nT) {
+  return 0.5f * (fresnel_parrallel(cosI, cosT, nT) +
+                 fresnel_perpendicular(cosI, cosT, nT));
+}
+
 extern "C" __device__ void __closesthit__glass() {
   auto prd = get_prd();
   auto data = (GlassHitGroupData *)optixGetSbtDataPointer();
   auto geom = get_geometry();
   TangentSpace &ts = geom.ts;
 
-  //prd->color += prd->weight * ts.n;
   russian_roulette(prd);
 
-  float3 d;
-  auto pdf = cosine_sample_hemisphere(prd->seed, d);
   auto base = ts.get_otho_base();
-  base.y = faceforward(base.y, -prd->ray.direction, base.y);
-  auto nextDir = base.local_to_world_dir(d);
+  float3 wi = base.world_to_local_dir(-prd->ray.direction);
+  float nT = wi.y > 0 ? data->ior : 1.0f / data->ior;
+  float cosI = abs(wi.y);
+  float sinI = sqrtf(max(1.0f - cosI * cosI, 0.00001f));
+  float sinT = sinI / nT;
+  float cosT = sqrtf(max(1.0f - sinT * sinT, 0.00001f));
+  auto fr = fresnel(cosI, cosT, nT);
+  auto reflectRate = sinT > 1.0f ? 1.2f : fr;
+  auto reflectDirLocal = make_float3(-wi.x, wi.y, -wi.z);
+  auto refractDirLocal = normalize(make_float3(-wi.x / nT, -wi.y, -wi.z / nT));
+  auto nextDirLocal =
+      rnd(prd->seed) < reflectRate ? reflectDirLocal : refractDirLocal;
+  auto nextDir = base.local_to_world_dir(nextDirLocal);
   // init next ray
   auto &scene = g_LaunchParams.scene;
-  prd->ray.origin = ts.origin + base.y * scene.epsilon;
+  prd->ray.origin =
+      ts.origin + faceforward(ts.n, nextDir, ts.n) * scene.epsilon;
   prd->ray.direction = nextDir;
   prd->ray.min = scene.epsilon;
   prd->ray.max = scene.extent;
-  // attenuate factor, some terms are cancelled out as
-  // hemisphere are cosine sampled
   prd->weight *= data->baseColor;
-
 }
 
 extern "C" __device__ void __anyhit__glass() {}
