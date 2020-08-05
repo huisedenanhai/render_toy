@@ -1,6 +1,6 @@
 [launch]
-spp = 100
-maxPathLength = 15
+spp = 100000
+maxPathLength = 30
 
 [frame]
 width = 800

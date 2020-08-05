@@ -299,7 +299,10 @@ extern "C" __device__ void __closesthit__glass() {
   auto fr = fresnel(cosI, cosT, nT);
   auto reflectRate = sinT > 1.0f ? 1.2f : fr;
   auto reflectDirLocal = make_float3(-wi.x, wi.y, -wi.z);
-  auto refractDirLocal = normalize(make_float3(-wi.x / nT, -wi.y, -wi.z / nT));
+  auto invLenXZ = 1.0f / max(sqrtf(wi.x * wi.x + wi.z * wi.z), 0.00001f);
+  auto refractDirLocal = normalize(make_float3(-wi.x * sinT * invLenXZ,
+                                               copysignf(cosT, -wi.y),
+                                               -wi.z * sinT * invLenXZ));
   auto nextDirLocal =
       rnd(prd->seed) < reflectRate ? reflectDirLocal : refractDirLocal;
   auto nextDir = base.local_to_world_dir(nextDirLocal);
