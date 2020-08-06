@@ -292,12 +292,16 @@ extern "C" __device__ void __closesthit__glass() {
   auto base = ts.get_otho_base();
   float3 wi = base.world_to_local_dir(-prd->ray.direction);
   float nT = wi.y > 0 ? data->ior : 1.0f / data->ior;
+  float nI = 1.0f / nT;
   float cosI = abs(wi.y);
   float sinI = sqrtf(max(1.0f - cosI * cosI, 0.00001f));
-  float sinT = sinI / nT;
+  float sinT = sinI * nI;
   float cosT = sqrtf(max(1.0f - sinT * sinT, 0.00001f));
   auto fr = fresnel(cosI, cosT, nT);
-  auto reflectRate = sinT > 1.0f ? 1.2f : fr;
+  auto fReflect = fr;
+  // we have fresnel(cosT, cosI, nI) == fresnel(cosI, cosT, nT)
+  auto fRefract = (1.0f - fr) * nI * nI;
+  auto reflectRate = sinT > 1.0f ? 1.2f : fReflect / (fReflect + fRefract);
   auto reflectDirLocal = make_float3(-wi.x, wi.y, -wi.z);
   auto invLenXZ = 1.0f / max(sqrtf(wi.x * wi.x + wi.z * wi.z), 0.00001f);
   auto refractDirLocal = normalize(make_float3(-wi.x * sinT * invLenXZ,
