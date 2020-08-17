@@ -1,5 +1,5 @@
 [launch]
-spp = 100
+spp = 10000
 maxPathLength = 30
 
 [frame]

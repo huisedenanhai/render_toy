@@ -1,6 +1,7 @@
 #include "pipeline.h"
 #include "random.h"
 #include "vec_math.h"
+#include <cstdint>
 #include <optix.h>
 
 using namespace dev;
@@ -36,8 +37,27 @@ __device__ __forceinline__ float3 &current_pixel_value() {
   return pixel_value(current_pixel());
 }
 
+__device__ __forceinline__ uint32_t reverse_bits_32(uint32_t n) {
+  n = (n << 16) | (n >> 16);
+  n = ((n & 0x00ff00ff) << 8) | ((n & 0xff00ff00) >> 8);
+  n = ((n & 0x0f0f0f0f) << 4) | ((n & 0xf0f0f0f0) >> 4);
+  n = ((n & 0x33333333) << 2) | ((n & 0xcccccccc) >> 2);
+  n = ((n & 0x55555555) << 1) | ((n & 0xaaaaaaaa) >> 1);
+  return n;
+}
+
+__device__ __forceinline__ float radical_inverse_base_2(uint32_t n) {
+  return saturate(reverse_bits_32(n) * float(2.3283064365386963e-10));
+}
+
+// 0 < i <= n
+__device__ __forceinline__ float2 hammersley_sample(uint32_t i, uint32_t n) {
+  return make_float2((float)(i) / (float)(n), radical_inverse_base_2(i));
+}
+
+// 0 < i <= spp
 __device__ __forceinline__ float
-sample_camera_ray(unsigned int &randState, float3 &origin, float3 &direction) {
+sample_camera_ray(uint32_t n, uint32_t spp, float3 &origin, float3 &direction) {
   const auto &cam = g_LaunchParams.camera;
   const auto &frame = g_LaunchParams.outputFrame;
   auto width = (float)frame.width;
@@ -45,8 +65,9 @@ sample_camera_ray(unsigned int &randState, float3 &origin, float3 &direction) {
   auto pixelIndex = current_pixel();
   auto pixel = make_float2(pixelIndex.x, pixelIndex.y);
   // jitter pixel position
-  pixel.x += rnd(randState);
-  pixel.y += rnd(randState);
+  auto sample = hammersley_sample(n, spp);
+  pixel.x += sample.x;
+  pixel.y += sample.y;
 
   auto canvasXY = rect_lerp(cam.canvas, pixel.x / width, pixel.y / height);
   auto dir = cam.right * canvasXY.x + cam.up * canvasXY.y - cam.back;
@@ -160,7 +181,7 @@ extern "C" __device__ void __raygen__entry() {
     prd.weight = make_float3(1.0f, 1.0f, 1.0f);
     prd.color = make_float3(0.0f, 0.0f, 0.0f);
 
-    auto w = sample_camera_ray(prd.seed, prd.ray.origin, prd.ray.direction);
+    auto w = sample_camera_ray(i + 1, spp, prd.ray.origin, prd.ray.direction);
     const auto &scene = g_LaunchParams.scene;
     prd.ray.min = scene.epsilon;
     prd.ray.max = scene.extent;
