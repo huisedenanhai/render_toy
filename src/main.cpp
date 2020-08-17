@@ -33,7 +33,7 @@ static void configure_ptx_dir(const char *exeDir) {
             << std::endl;
 }
 
-int main(int argc, const char **argv) {
+int run(int argc, const char **argv) {
   printf("exe: %s\n", argv[0]);
   configure_ptx_dir(argv[0]);
   if (argc < 2) {
@@ -73,9 +73,9 @@ int main(int argc, const char **argv) {
       auto &param = launchParams[i];
       auto &camera = param.camera;
       camera.position = scene.camera.position;
-      camera.right = make_float3(1.0f, 0.0f, 0.0f);
-      camera.up = make_float3(0.0f, 1.0f, 0.0f);
-      camera.back = make_float3(0.0f, 0.0f, 1.0f);
+      camera.right = scene.camera.right;
+      camera.up = scene.camera.up;
+      camera.back = scene.camera.back;
       auto canvasWidth = frameWidth / frameResolution;
       auto canvasHeight = frameHeight / frameResolution;
       camera.canvas = dev::make_rect(
@@ -191,4 +191,13 @@ int main(int argc, const char **argv) {
     printf("result written to output.png\n");
   }
   return 0;
+}
+
+int main(int argc, const char **argv) {
+  try {
+    return run(argc, argv);
+  } catch (std::exception &e) {
+    std::cerr << e.what() << std::endl;
+    return -1;
+  }
 }

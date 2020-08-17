@@ -1,10 +1,10 @@
 [launch]
-spp = 100
+spp = 10000
 maxPathLength = 30
 
 [frame]
 width = 800
-height = 800
+height = 500
 resolution = 1000
 
 [tile]
@@ -13,10 +13,12 @@ height = 64
 
 [camera]
 # camera faces local -z
-position = [0.0, 1.0, 5.0]
+position = [1.7, 7.8, 12.2]
+# XYZ Euler in degree
+rotation = [-28.9, 3.34, 0.0]
 
 [miss]
 color = [0.0, 0.0, 0.0]
 
 [[include]]
-file = "CornellBox-Original.toml"
+file = "prism.toml"

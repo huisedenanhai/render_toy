@@ -1,0 +1,37 @@
+[[material]]
+id = "Glass.b4648a2e-5fd0-6f66-6e6b-ac769f38e53f"
+type = "glass"
+ior = 1.5
+baseColor = [1.0, 1.0, 1.0]
+
+[[material]]
+id = "Ground.f234332a-92a5-9230-d672-30a767756e9b"
+baseColor = [0.800000, 0.800000, 0.800000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[material]]
+id = "Light.5fb9b99d-3883-f2cf-6660-8df633345927"
+baseColor = [0.800000, 0.800000, 0.800000]
+emission = [35.0, 35.0, 35.0]
+
+[[material]]
+id = "Screen.13e7138a-170a-bd77-e9a5-2618da87da44"
+baseColor = [0.800000, 0.800000, 0.800000]
+emission = [0.000000, 0.000000, 0.000000]
+
+[[mesh]]
+file = "components\\Ground_Plane.de3e33dc-ebcb-5da3-0449-57b9dfe4a568.ma"
+material = "Ground.f234332a-92a5-9230-d672-30a767756e9b"
+
+[[mesh]]
+file = "components\\Prism_Cylinder.ddb4f9d8-3d5b-3685-7763-d95b0a4bb1da.ma"
+material = "Glass.b4648a2e-5fd0-6f66-6e6b-ac769f38e53f"
+
+[[mesh]]
+file = "components\\Light_Plane.001.037b44a8-5de2-2758-93a8-12bb0ecda5d5.ma"
+material = "Light.5fb9b99d-3883-f2cf-6660-8df633345927"
+
+[[mesh]]
+file = "components\\Screen_Plane.002.431e4a4d-5201-4d1b-53b3-1093263f084b.ma"
+material = "Screen.13e7138a-170a-bd77-e9a5-2618da87da44"
+

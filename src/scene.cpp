@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "rotation.h"
 #include <cpptoml/cpptoml.h>
 #include <iostream>
 #include <unordered_map>
@@ -13,6 +14,16 @@ inline T get_value_required(const std::shared_ptr<cpptoml::table> &table,
                              "\" is required");
   }
   return *v;
+}
+
+inline float3 get_float3(const std::shared_ptr<cpptoml::table> &table,
+                         const std::string &key,
+                         const float3 &defaultValue) {
+  auto value = table->get_array_of<double>(key);
+  if (value && value->size() == 3) {
+    return make_float3(value->at(0), value->at(1), value->at(2));
+  }
+  return defaultValue;
 }
 
 inline void load_launch(Scene::Launch &launch,
@@ -39,11 +50,12 @@ inline void load_camera(Scene::Camera &camera,
   if (!table) {
     return;
   }
-  auto position = table->get_array_of<double>("position");
-  if (position && position->size() == 3) {
-    camera.position =
-        make_float3(position->at(0), position->at(1), position->at(2));
-  }
+  camera.position = get_float3(table, "position", make_float3(0, 0, 0));
+  auto eulerXYZ = get_float3(table, "rotation", make_float3(0, 0, 0));
+  auto rotation = euler_xyz_to_matrix(eulerXYZ.x, eulerXYZ.y, eulerXYZ.z);
+  camera.right = make_float3(rotation[0][0], rotation[0][1], rotation[0][2]);
+  camera.up = make_float3(rotation[1][0], rotation[1][1], rotation[1][2]);
+  camera.back = make_float3(rotation[2][0], rotation[2][1], rotation[2][2]);
 }
 
 inline void load_frame(Scene::Frame &frame,
@@ -221,7 +233,7 @@ MeshData load_ma(const fs::path &path) {
 inline void build_sbt(Scene &scene,
                       IIntegrator &integrator,
                       const std::shared_ptr<cpptoml::table> &toml) {
-  auto builder = integrator.get_stb_builder();
+  auto builder = integrator.get_stb_builder(toml);
   // always add a default material
   auto &defaultMat = integrator.materials.at("default");
   defaultMat.material->add_hit_record(builder, defaultMat.index, nullptr);

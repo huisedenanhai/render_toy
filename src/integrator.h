@@ -26,7 +26,8 @@ public:
   std::map<std::string, MaterialEntry> materials;
 
   // a partially inited sbt builder, only hit records are untouched
-  virtual ShaderBindingTableBuilder get_stb_builder() = 0;
+  virtual ShaderBindingTableBuilder
+  get_stb_builder(const std::shared_ptr<cpptoml::table> &toml) = 0;
 
   virtual ~IIntegrator() {}
 };

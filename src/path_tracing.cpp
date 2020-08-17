@@ -7,7 +7,7 @@ inline float3 get_color(const std::shared_ptr<cpptoml::table> &data,
   if (!data) {
     return defaultValue;
   }
-  auto v = data->get_array_of<double>(key);
+  auto v = data->get_qualified_array_of<double>(key);
   if (!v) {
     return defaultValue;
   }
@@ -34,13 +34,13 @@ void PathGlassMaterial::add_hit_record(
       get_color(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
 }
 
-ShaderBindingTableBuilder PathIntegrator::get_stb_builder() {
+ShaderBindingTableBuilder PathIntegrator::get_stb_builder(const std::shared_ptr<cpptoml::table> &toml) {
   ShaderBindingTableBuilder builder(&pipeline);
   builder.add_raygen_record<dev::RayGenData>(0);
   auto exceptionRecord = builder.add_exception_record<dev::ExceptionData>(0);
   exceptionRecord->errorColor = make_float3(0, 1.0f, 0);
   auto missRecord = builder.add_miss_record<dev::MissData>(0);
-  missRecord->color = make_float3(0.0f, 0.0f, 0.0f);
+  missRecord->color = get_color(toml, "miss.color", make_float3(0.5f, 0.5f, 0.5f));
   return builder;
 }
 

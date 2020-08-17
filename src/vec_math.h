@@ -1,11 +1,9 @@
 #pragma once
 
 #include <cmath>
+#include "math_consts.h"
 
 #define VEC_MATH_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
-
-constexpr float Pi = 3.1415926f;
-constexpr float InvPi = 1.0f / 3.1415926f;
 
 // multiply
 VEC_MATH_HOST_DEVICE_INLINE float3 operator*(const float3 &a, const float3 &b) {

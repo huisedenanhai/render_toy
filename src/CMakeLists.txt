@@ -34,6 +34,8 @@ target_include_directories(obj2ma PRIVATE
 
 add_executable(toy_exe
   main.cpp
+  math_consts.h
+  rotation.h
   context.h
   context.cpp
   scene.h

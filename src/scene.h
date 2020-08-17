@@ -27,6 +27,9 @@ struct Scene {
 
   struct Camera {
     float3 position{};
+    float3 right;
+    float3 up;
+    float3 back;
   };
 
   Launch launch;
