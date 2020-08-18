@@ -157,7 +157,7 @@ __device__ __forceinline__ float
 cosine_sample_hemisphere(unsigned int &randState, float3 &d) {
   auto theta = 2.0f * Pi * rnd(randState);
   auto r = sqrtf(rnd(randState));
-  auto y = sqrtf(1 - r * r);
+  auto y = sqrtf(max(1 - r * r, 0.0f));
   d.x = r * cosf(theta);
   d.y = y;
   d.z = r * sinf(theta);
