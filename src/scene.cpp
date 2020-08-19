@@ -67,6 +67,8 @@ inline void load_frame(Scene::Frame &frame,
   frame.height = table->get_as<unsigned int>("height").value_or(frame.height);
   frame.resolution =
       table->get_as<unsigned int>("resolution").value_or(frame.resolution);
+  frame.hdr = table->get_as<bool>("hdr").value_or(frame.hdr);
+  frame.exposure = table->get_as<double>("exposure").value_or(frame.exposure);
 }
 
 static const std::string parentDirKey = "__parent_dir";

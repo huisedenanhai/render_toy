@@ -18,6 +18,8 @@ struct Scene {
     unsigned int width = 800;
     unsigned int height = 800;
     unsigned int resolution = 1000;
+    bool hdr = false;
+    float exposure = 1.0f;
   };
 
   struct Tile {

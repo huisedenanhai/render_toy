@@ -24,6 +24,14 @@ void PathDiffuseMaterial::add_hit_record(
   record->emission = get_color(data, "emission", make_float3(0.0f, 0.0f, 0.0f));
 }
 
+void PathBlackBodyMaterial::add_hit_record(
+    ShaderBindingTableBuilder &builder,
+    unsigned int index,
+    const std::shared_ptr<cpptoml::table> &data) {
+  auto record = builder.add_hit_record<dev::BlackBodyHitGroupData>(index);
+  record->temperature = data->get_as<double>("temperature").value_or(3000.0f);
+}
+
 void PathGlassMaterial::add_hit_record(
     ShaderBindingTableBuilder &builder,
     unsigned int index,
@@ -34,13 +42,15 @@ void PathGlassMaterial::add_hit_record(
       get_color(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
 }
 
-ShaderBindingTableBuilder PathIntegrator::get_stb_builder(const std::shared_ptr<cpptoml::table> &toml) {
+ShaderBindingTableBuilder
+PathIntegrator::get_stb_builder(const std::shared_ptr<cpptoml::table> &toml) {
   ShaderBindingTableBuilder builder(&pipeline);
   builder.add_raygen_record<dev::RayGenData>(0);
   auto exceptionRecord = builder.add_exception_record<dev::ExceptionData>(0);
   exceptionRecord->errorColor = make_float3(0, 1.0f, 0);
   auto missRecord = builder.add_miss_record<dev::MissData>(0);
-  missRecord->color = get_color(toml, "miss.color", make_float3(0.5f, 0.5f, 0.5f));
+  missRecord->color =
+      get_color(toml, "miss.color", make_float3(0.5f, 0.5f, 0.5f));
   return builder;
 }
 
@@ -70,6 +80,10 @@ std::unique_ptr<IIntegrator> PathIntegratorBuilder::build() {
                          "__closesthit__glass",
                          "__anyhit__glass",
                          std::make_unique<PathGlassMaterial>());
+  hitGroups.emplace_back("blackbody",
+                         "__closesthit__blackbody",
+                         "__anyhit__blackbody",
+                         std::make_unique<PathBlackBodyMaterial>());
 
   auto builder = PipelineBuilder()
                      .set_launch_params("g_LaunchParams")

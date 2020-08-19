@@ -1,11 +1,13 @@
 [launch]
-spp = 10000
+spp = 1000000
 maxPathLength = 30
 
 [frame]
 width = 800
 height = 500
 resolution = 1000
+hdr = true
+exposure = 1.4e-11
 
 [tile]
 width = 64

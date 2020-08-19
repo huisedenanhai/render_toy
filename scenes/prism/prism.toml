@@ -11,8 +11,8 @@ emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
 id = "Light.5fb9b99d-3883-f2cf-6660-8df633345927"
-baseColor = [0.000000, 0.000000, 0.000000]
-emission = [35.0, 35.0, 35.0]
+type = "blackbody"
+temperature = 6000.0
 
 [[material]]
 id = "Screen.13e7138a-170a-bd77-e9a5-2618da87da44"

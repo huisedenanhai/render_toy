@@ -182,10 +182,17 @@ int run(int argc, const char **argv) {
       }
       return (unsigned char)(v);
     };
+    auto toneMapping = [&scene](float v) {
+      if (!scene.frame.hdr) {
+        return v;
+      }
+      return 1.0f - exp(-scene.frame.exposure * v);
+    };
     for (int i = 0; i < elemCnt; i++) {
-      resultAsBytes[i] = convertPixel(result[i]);
+      resultAsBytes[i] = convertPixel(toneMapping(result[i]));
     }
     stbi_flip_vertically_on_write(1);
+    stbi_write_hdr("output.hdr", frameWidth, frameHeight, 3, result.get());
     stbi_write_png(
         "output.png", frameWidth, frameHeight, 3, resultAsBytes.get(), 0);
     printf("result written to output.png\n");

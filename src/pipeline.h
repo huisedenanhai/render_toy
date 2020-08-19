@@ -105,4 +105,23 @@ struct GlassHitGroupData {
   float3 baseColor;
   float ior;
 };
+
+struct BlackBodyHitGroupData {
+  // temperature in K
+  float temperature;
+
+  // wave length is with the unit nm
+  __host__ __device__ inline float sample_spectrum(float waveLength) {
+    constexpr float c = 299792458.0f;
+    constexpr float h = 6.62606957e-34f;
+    constexpr float kb = 1.3806488e-23f;
+    constexpr float hc2 = h * c * c;
+    constexpr float hc = h * c;
+    // convert to meter
+    float lm = waveLength * 1e-9f;
+    float lm2 = lm * lm;
+    float lm5 = lm2 * lm2 * lm;
+    return 2.0f * hc2 / (lm5 * (expf(hc / (lm * kb * temperature)) - 1));
+  }
+};
 } // namespace dev

@@ -1,3 +1,4 @@
+#include "color.h"
 #include "pipeline.h"
 #include "random.h"
 #include "vec_math.h"
@@ -120,8 +121,10 @@ struct RayPayload {
   bool finish;
   Ray ray;
   int length;
-  float3 weight;
-  float3 color;
+  float lambda;
+  float waveLength;
+  float weight;
+  float L;
   unsigned int seed;
 };
 
@@ -164,6 +167,23 @@ cosine_sample_hemisphere(unsigned int &randState, float3 &d) {
   return y * InvPi;
 }
 
+__device__ __forceinline__ float lerp(float a, float b, float t) {
+  return a + t * (b - a);
+}
+
+// lambda lies in range [0, 1]
+__device__ __forceinline__ float3 sample_xyz(float lambda) {
+  float indexF = lambda * (float)CMF_WaveLengthCount;
+  auto indexMin = min((size_t)(floor(indexF)), CMF_WaveLengthCount - 1);
+  auto indexMax = max((size_t)(ceil(indexF)), CMF_WaveLengthCount - 1);
+  float v = indexF - floor(indexF);
+  auto sample_comp = [&](float *cmf) {
+    return lerp(cmf[indexMin], cmf[indexMax], v);
+  };
+  return make_float3(
+      sample_comp(CMF_X), sample_comp(CMF_Y), sample_comp(CMF_Z));
+}
+
 extern "C" __device__ void __raygen__entry() {
   auto pixelIndex = current_pixel();
   RayPayload prd{};
@@ -172,14 +192,16 @@ extern "C" __device__ void __raygen__entry() {
   unsigned int p0, p1;
   unpack_ptr(&prd, p0, p1);
 
-  float3 pixelColor = make_float3(0.0f, 0.0f, 0.0f);
+  float3 pixelColorXYZ = make_float3(0.0f, 0.0f, 0.0f);
   auto spp = g_LaunchParams.spp;
 
   for (int i = 0; i < spp; i++) {
     prd.finish = false;
     prd.length = 0;
-    prd.weight = make_float3(1.0f, 1.0f, 1.0f);
-    prd.color = make_float3(0.0f, 0.0f, 0.0f);
+    prd.lambda = rnd(prd.seed);
+    prd.waveLength = lerp(CMF_MinWaveLength, CMF_MaxWaveLength, prd.lambda);
+    prd.weight = 1.0f;
+    prd.L = 0.0f;
 
     auto w = sample_camera_ray(i + 1, spp, prd.ray.origin, prd.ray.direction);
     const auto &scene = g_LaunchParams.scene;
@@ -202,16 +224,17 @@ extern "C" __device__ void __raygen__entry() {
                  p0,
                  p1);
     }
-    pixelColor += w * prd.color;
+    pixelColorXYZ += w * prd.L * sample_xyz(prd.lambda);
   }
-  current_pixel_value() = pixelColor / (float)spp;
+  pixelColorXYZ /= (float)spp;
+  current_pixel_value() = xyz_to_srgb(pixelColorXYZ);
 }
 
 extern "C" __device__ void __miss__entry() {
   auto data = (MissData *)optixGetSbtDataPointer();
   auto prd = get_prd();
 
-  prd->color += prd->weight * data->color;
+  // prd->L += prd->weight * data->L;
   prd->finish = true;
 }
 
@@ -250,11 +273,22 @@ __device__ __forceinline__ Geometry get_geometry() {
 __device__ __forceinline__ void russian_roulette(RayPayload *prd) {
   // Russian Roulette
   // don't make the prob too small
-  auto continueRate = min(max(length(prd->weight), 0.03f), 1.0f);
+  auto continueRate = min(max(prd->weight, 0.03f), 1.0f);
   bool rrFinish = prd->length >= 3 && rnd(prd->seed) > continueRate;
   prd->finish = prd->length >= g_LaunchParams.maxPathLength || rrFinish;
   prd->weight /= continueRate;
 }
+
+extern "C" __device__ void __closesthit__blackbody() {
+  auto prd = get_prd();
+  auto data = (BlackBodyHitGroupData *)optixGetSbtDataPointer();
+
+  prd->L += prd->weight * data->sample_spectrum(prd->waveLength);
+  // prd->L += prd->weight * 300.0f;
+  prd->finish = true;
+}
+
+extern "C" __device__ void __anyhit__blackbody() {}
 
 extern "C" __device__ void __closesthit__diffuse() {
   auto prd = get_prd();
@@ -262,7 +296,7 @@ extern "C" __device__ void __closesthit__diffuse() {
   auto geom = get_geometry();
   TangentSpace &ts = geom.ts;
 
-  prd->color += prd->weight * data->emission;
+  // prd->color += prd->weight * data->emission;
   // rr will modify the weight
   russian_roulette(prd);
 
@@ -280,7 +314,10 @@ extern "C" __device__ void __closesthit__diffuse() {
   prd->ray.max = scene.extent;
   // attenuate factor, some terms are cancelled out as
   // hemisphere are cosine sampled
-  prd->weight *= data->baseColor;
+  // TODO upsample color to spectrum
+  // prd->weight *= data->baseColor;
+  // use hard coded color
+  prd->weight *= 0.9f;
 }
 
 extern "C" __device__ void __anyhit__diffuse() {}
@@ -312,7 +349,9 @@ extern "C" __device__ void __closesthit__glass() {
 
   auto base = ts.get_otho_base();
   float3 wi = base.world_to_local_dir(-prd->ray.direction);
-  float nT = wi.y > 0 ? data->ior : 1.0f / data->ior;
+  // TODO use configurable IOR
+  float ior = lerp(1.3f, 1.7f, prd->lambda);
+  float nT = wi.y > 0 ? ior : 1.0f / ior;
   float nI = 1.0f / nT;
   float cosI = abs(wi.y);
   float sinI = sqrtf(max(1.0f - cosI * cosI, 0.00001f));
@@ -338,7 +377,8 @@ extern "C" __device__ void __closesthit__glass() {
   prd->ray.direction = nextDir;
   prd->ray.min = scene.epsilon;
   prd->ray.max = scene.extent;
-  prd->weight *= data->baseColor;
+  // TODO upsample color to spectrum
+  // prd->weight *= data->baseColor;
 }
 
 extern "C" __device__ void __anyhit__glass() {}
