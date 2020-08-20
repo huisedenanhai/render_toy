@@ -1,13 +1,13 @@
 [launch]
-spp = 1000
-maxPathLength = 3
+spp = 100
+maxPathLength = 30
 
 [frame]
 width = 800
 height = 800
 resolution = 1000
 hdr = true
-exposure = 100
+exposure = 1
 
 [tile]
 width = 64

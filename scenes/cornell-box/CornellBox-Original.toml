@@ -52,7 +52,7 @@ id = "light.9cafcdb7-3c87-27f9-cea3-25661046feb2"
 # emission = [53.407074, 37.699112, 12.566370]
 type = "blackbody"
 temperature = 6000.0
-strength = 37.0
+strength = 100.0
 
 [[mesh]]
 file = "components\\floor.4213df6e-cb14-a5b6-8481-124faad2f4c2.ma"

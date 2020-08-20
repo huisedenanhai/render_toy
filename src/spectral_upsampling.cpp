@@ -59,6 +59,9 @@ inline float lerp(float a, float b, float t) {
 float3 RGB2Spectral::rgb_to_coeff(const float3 &rgb) const {
   assert(rgb.x >= 0.0f && rgb.y >= 0.0f && rgb.z >= 0.0f);
   assert(rgb.x <= 1.0f && rgb.y <= 1.0f && rgb.z <= 1.0f);
+  if (rgb.x == 0 && rgb.y == 0 && rgb.z == 0) {
+    return make_float3(0, 0, 0);
+  }
 
   float rgbValues[3] = {rgb.x, rgb.y, rgb.z};
   int maxCompIndex = 0;

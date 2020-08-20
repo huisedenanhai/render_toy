@@ -143,11 +143,11 @@ struct BlackBodyHitGroupData {
 };
 
 __host__ __device__ inline float multiply_and_add(float a, float b, float c) {
-  return a * b + c;
+  return fma(a, b, c);
 }
 
-__host__ __device__ inline float eval_spectrum(const float3 &coeff,
-                                               float waveLength) {
+__host__ __device__ inline float eval_rgb_to_spectral_coeff(const float3 &coeff,
+                                                            float waveLength) {
   float x = multiply_and_add(
       multiply_and_add(coeff.x, waveLength, coeff.y), waveLength, coeff.z);
   float y = 1.f / sqrtf(multiply_and_add(x, x, 1.f));

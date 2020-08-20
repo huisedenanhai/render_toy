@@ -185,6 +185,11 @@ __device__ __forceinline__ float3 sample_xyz(float lambda) {
       sample_comp(CMF_X), sample_comp(CMF_Y), sample_comp(CMF_Z));
 }
 
+__device__ __forceinline__ float eval_spectrum(const float3 &coeff,
+                                               float waveLength) {
+  return eval_rgb_to_spectral_coeff(coeff, waveLength);
+}
+
 extern "C" __device__ void __raygen__entry() {
   auto pixelIndex = current_pixel();
   RayPayload prd{};
@@ -235,7 +240,7 @@ extern "C" __device__ void __miss__entry() {
   auto data = (MissData *)optixGetSbtDataPointer();
   auto prd = get_prd();
 
-  prd->L += prd->weight * eval_spectrum(data->colorCoeff, prd->waveLength);
+  // prd->L += prd->weight * eval_spectrum(data->colorCoeff, prd->waveLength);
   prd->finish = true;
 }
 
@@ -296,7 +301,8 @@ extern "C" __device__ void __closesthit__diffuse() {
   auto geom = get_geometry();
   TangentSpace &ts = geom.ts;
 
-  prd->L += prd->weight * eval_spectrum(data->emissionCoeff, prd->waveLength);
+  // prd->L += prd->weight * eval_spectrum(data->emissionCoeff,
+  // prd->waveLength);
   // rr will modify the weight
   russian_roulette(prd);
 
