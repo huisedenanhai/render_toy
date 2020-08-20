@@ -4,6 +4,8 @@
 #include <iostream>
 #include <unordered_map>
 
+std::unique_ptr<RGB2Spectral> Scene::rgb2spectral = nullptr;
+
 template <typename T>
 inline T get_value_required(const std::shared_ptr<cpptoml::table> &table,
                             const std::string &key,

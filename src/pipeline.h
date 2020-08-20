@@ -93,35 +93,65 @@ struct ExceptionData {
 };
 
 struct MissData {
-  float3 color;
+  float3 colorCoeff;
 };
 
 struct DiffuseHitGroupData {
-  float3 baseColor;
-  float3 emission;
+  float3 baseColorCoeff;
+  float3 emissionCoeff;
 };
 
 struct GlassHitGroupData {
-  float3 baseColor;
-  float ior;
+  float3 baseColorCoeff;
+  struct IOR {
+    float waveLength390;
+    float waveLength830;
+  } ior;
 };
 
 struct BlackBodyHitGroupData {
   // temperature in K
   float temperature;
+  float scaleFactor;
+
+  constexpr static float c = 299792458.0f;
+  constexpr static float h = 6.62606957e-34f;
+  constexpr static float kb = 1.3806488e-23f;
+
+  __host__ __device__ inline float unscaled_total_energy() {
+    constexpr float factor = 1.80494e-8f;
+    float t2 = temperature * temperature;
+    float t4 = t2 * t2;
+    return factor * t4;
+  }
 
   // wave length is with the unit nm
-  __host__ __device__ inline float sample_spectrum(float waveLength) {
-    constexpr float c = 299792458.0f;
-    constexpr float h = 6.62606957e-34f;
-    constexpr float kb = 1.3806488e-23f;
-    constexpr float hc2 = h * c * c;
-    constexpr float hc = h * c;
+  // sample without normalization
+  __host__ __device__ inline float sample_spectrum_unscaled(float waveLength) {
+    constexpr float twohc2 = 1.19104e-16f;
+    constexpr float hc_k = 0.0143878f;
     // convert to meter
     float lm = waveLength * 1e-9f;
     float lm2 = lm * lm;
     float lm5 = lm2 * lm2 * lm;
-    return 2.0f * hc2 / (lm5 * (expf(hc / (lm * kb * temperature)) - 1));
+    return twohc2 / (lm5 * (expf(hc_k / (lm * temperature)) - 1));
+  }
+
+  __host__ __device__ inline float sample_spectrum_scaled(float waveLength) {
+    return sample_spectrum_unscaled(waveLength) * scaleFactor;
   }
 };
+
+__host__ __device__ inline float multiply_and_add(float a, float b, float c) {
+  return a * b + c;
+}
+
+__host__ __device__ inline float eval_spectrum(const float3 &coeff,
+                                               float waveLength) {
+  float x = multiply_and_add(
+      multiply_and_add(coeff.x, waveLength, coeff.y), waveLength, coeff.z);
+  float y = 1.f / sqrtf(multiply_and_add(x, x, 1.f));
+  return multiply_and_add(.5f * x, y, .5f);
+}
+
 } // namespace dev

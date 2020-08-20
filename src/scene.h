@@ -1,6 +1,7 @@
 #pragma once
 #include "context.h"
 #include "integrator.h"
+#include "spectral_upsampling.h"
 #include <filesystem>
 #include <map>
 #include <vector_functions.h>
@@ -18,7 +19,7 @@ struct Scene {
     unsigned int width = 800;
     unsigned int height = 800;
     unsigned int resolution = 1000;
-    bool hdr = false;
+    bool hdr = true;
     float exposure = 1.0f;
   };
 
@@ -33,6 +34,8 @@ struct Scene {
     float3 up;
     float3 back;
   };
+
+  static std::unique_ptr<RGB2Spectral> rgb2spectral;
 
   Launch launch;
   Frame frame;

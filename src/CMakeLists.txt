@@ -45,6 +45,8 @@ add_executable(toy_exe
   path_tracing.h
   path_tracing.cpp
   exceptions.h
+  spectral_upsampling.h
+  spectral_upsampling.cpp
   )
 target_compile_features(toy_exe PRIVATE
   cxx_std_17
@@ -53,6 +55,7 @@ target_include_directories(toy_exe PRIVATE
   ${CMAKE_SOURCE_DIR}/ext
   ${CUDA_INCLUDE_DIRS}
   ${OPTIX_7_INCLUDE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
   )
 target_link_directories(toy_exe PRIVATE
   ${CUDA_LIBRARY_DIR}
@@ -88,3 +91,5 @@ add_custom_target(toy ALL
   COMMENT "copy ptx to exe dir"
   )
 add_dependencies(toy toy_ptx)
+
+configure_file(config.h.in config.h)

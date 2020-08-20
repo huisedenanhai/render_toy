@@ -1,5 +1,6 @@
 #include "path_tracing.h"
 #include "pipeline.h"
+#include "scene.h"
 
 inline float3 get_color(const std::shared_ptr<cpptoml::table> &data,
                         const std::string &key,
@@ -14,14 +15,21 @@ inline float3 get_color(const std::shared_ptr<cpptoml::table> &data,
   return make_float3(v->at(0), v->at(1), v->at(2));
 }
 
+inline float3 get_color_coeff(const std::shared_ptr<cpptoml::table> &data,
+                              const std::string &key,
+                              float3 defaultValue) {
+  return Scene::rgb2spectral->rgb_to_coeff(get_color(data, key, defaultValue));
+}
+
 void PathDiffuseMaterial::add_hit_record(
     ShaderBindingTableBuilder &builder,
     unsigned int index,
     const std::shared_ptr<cpptoml::table> &data) {
   auto record = builder.add_hit_record<dev::DiffuseHitGroupData>(index);
-  record->baseColor =
-      get_color(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
-  record->emission = get_color(data, "emission", make_float3(0.0f, 0.0f, 0.0f));
+  record->baseColorCoeff =
+      get_color_coeff(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
+  record->emissionCoeff =
+      get_color_coeff(data, "emission", make_float3(0.0f, 0.0f, 0.0f));
 }
 
 void PathBlackBodyMaterial::add_hit_record(
@@ -29,7 +37,9 @@ void PathBlackBodyMaterial::add_hit_record(
     unsigned int index,
     const std::shared_ptr<cpptoml::table> &data) {
   auto record = builder.add_hit_record<dev::BlackBodyHitGroupData>(index);
-  record->temperature = data->get_as<double>("temperature").value_or(3000.0f);
+  record->temperature = data->get_as<double>("temperature").value_or(6000.0);
+  double strength = data->get_as<double>("strength").value_or(1.0);
+  record->scaleFactor = float(strength / record->unscaled_total_energy() / 1e6);
 }
 
 void PathGlassMaterial::add_hit_record(
@@ -37,9 +47,19 @@ void PathGlassMaterial::add_hit_record(
     unsigned int index,
     const std::shared_ptr<cpptoml::table> &data) {
   auto record = builder.add_hit_record<dev::GlassHitGroupData>(index);
-  record->ior = data->get_as<double>("ior").value_or(1.3);
-  record->baseColor =
-      get_color(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
+  auto defaultIOR = 1.45f;
+  auto iorT = data->get_table("ior");
+  if (iorT) {
+    record->ior.waveLength390 =
+        iorT->get_as<double>("waveLength390").value_or(defaultIOR);
+    record->ior.waveLength830 =
+        iorT->get_as<double>("waveLength830").value_or(defaultIOR);
+  } else {
+    record->ior.waveLength390 = record->ior.waveLength830 =
+        data->get_as<double>("ior").value_or(defaultIOR);
+  }
+  record->baseColorCoeff =
+      get_color_coeff(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
 }
 
 ShaderBindingTableBuilder
@@ -49,8 +69,8 @@ PathIntegrator::get_stb_builder(const std::shared_ptr<cpptoml::table> &toml) {
   auto exceptionRecord = builder.add_exception_record<dev::ExceptionData>(0);
   exceptionRecord->errorColor = make_float3(0, 1.0f, 0);
   auto missRecord = builder.add_miss_record<dev::MissData>(0);
-  missRecord->color =
-      get_color(toml, "miss.color", make_float3(0.5f, 0.5f, 0.5f));
+  missRecord->colorCoeff =
+      get_color_coeff(toml, "miss.color", make_float3(0.5f, 0.5f, 0.5f));
   return builder;
 }
 

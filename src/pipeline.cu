@@ -1,4 +1,5 @@
-#include "color.h"
+#include "cmf.h"
+#include "d65.h"
 #include "pipeline.h"
 #include "random.h"
 #include "vec_math.h"
@@ -234,7 +235,7 @@ extern "C" __device__ void __miss__entry() {
   auto data = (MissData *)optixGetSbtDataPointer();
   auto prd = get_prd();
 
-  // prd->L += prd->weight * data->L;
+  prd->L += prd->weight * eval_spectrum(data->colorCoeff, prd->waveLength);
   prd->finish = true;
 }
 
@@ -283,8 +284,7 @@ extern "C" __device__ void __closesthit__blackbody() {
   auto prd = get_prd();
   auto data = (BlackBodyHitGroupData *)optixGetSbtDataPointer();
 
-  prd->L += prd->weight * data->sample_spectrum(prd->waveLength);
-  // prd->L += prd->weight * 300.0f;
+  prd->L += prd->weight * data->sample_spectrum_scaled(prd->waveLength);
   prd->finish = true;
 }
 
@@ -296,7 +296,7 @@ extern "C" __device__ void __closesthit__diffuse() {
   auto geom = get_geometry();
   TangentSpace &ts = geom.ts;
 
-  // prd->color += prd->weight * data->emission;
+  prd->L += prd->weight * eval_spectrum(data->emissionCoeff, prd->waveLength);
   // rr will modify the weight
   russian_roulette(prd);
 
@@ -314,10 +314,7 @@ extern "C" __device__ void __closesthit__diffuse() {
   prd->ray.max = scene.extent;
   // attenuate factor, some terms are cancelled out as
   // hemisphere are cosine sampled
-  // TODO upsample color to spectrum
-  // prd->weight *= data->baseColor;
-  // use hard coded color
-  prd->weight *= 0.9f;
+  prd->weight *= eval_spectrum(data->baseColorCoeff, prd->waveLength);
 }
 
 extern "C" __device__ void __anyhit__diffuse() {}
@@ -349,8 +346,8 @@ extern "C" __device__ void __closesthit__glass() {
 
   auto base = ts.get_otho_base();
   float3 wi = base.world_to_local_dir(-prd->ray.direction);
-  // TODO use configurable IOR
-  float ior = lerp(1.3f, 1.7f, prd->lambda);
+  float ior =
+      lerp(data->ior.waveLength390, data->ior.waveLength830, prd->lambda);
   float nT = wi.y > 0 ? ior : 1.0f / ior;
   float nI = 1.0f / nT;
   float cosI = abs(wi.y);
@@ -377,8 +374,7 @@ extern "C" __device__ void __closesthit__glass() {
   prd->ray.direction = nextDir;
   prd->ray.min = scene.epsilon;
   prd->ray.max = scene.extent;
-  // TODO upsample color to spectrum
-  // prd->weight *= data->baseColor;
+  prd->weight *= eval_spectrum(data->baseColorCoeff, prd->waveLength);
 }
 
 extern "C" __device__ void __anyhit__glass() {}

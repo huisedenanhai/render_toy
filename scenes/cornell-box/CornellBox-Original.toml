@@ -26,23 +26,33 @@ emission = [0.000000, 0.000000, 0.000000]
 [[material]]
 id = "shortBox.618c5df8-e207-e3e1-f666-449683a17af1"
 type = "glass"
-ior = 1.5
 #baseColor = [0.725000, 0.710000, 0.680000]
-baseColor = [1.0, 1.0, 1.0]
 #emission = [0.000000, 0.000000, 0.000000]
+baseColor = [1.0, 1.0, 1.0]
+[material.ior]
+# data from https://refractiveindex.info/?shelf=3d&book=glass&page=BAF10
+waveLength390 = 1.6987
+waveLength830 = 1.6591
 
 [[material]]
 id = "tallBox.20c2ccea-aec8-91bb-8002-800a667d44b6"
 type = "glass"
-ior = 1.5
 #emission = [0.000000, 0.000000, 0.000000]
 #baseColor = [0.725000, 0.710000, 0.680000]
 baseColor = [1.0, 1.0, 1.0]
 
+[material.ior]
+# data from https://refractiveindex.info/?shelf=3d&book=glass&page=BAF10
+waveLength390 = 1.6987
+waveLength830 = 1.6591
+
 [[material]]
 id = "light.9cafcdb7-3c87-27f9-cea3-25661046feb2"
-baseColor = [0.780000, 0.780000, 0.780000]
-emission = [53.407074, 37.699112, 12.566370]
+# baseColor = [0.780000, 0.780000, 0.780000]
+# emission = [53.407074, 37.699112, 12.566370]
+type = "blackbody"
+temperature = 6000.0
+strength = 37.0
 
 [[mesh]]
 file = "components\\floor.4213df6e-cb14-a5b6-8481-124faad2f4c2.ma"

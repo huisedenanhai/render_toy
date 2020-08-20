@@ -1,4 +1,5 @@
 #include "Scene.h"
+#include "config.h"
 #include "context.h"
 #include "exceptions.h"
 #include "path_tracing.h"
@@ -43,6 +44,7 @@ int run(int argc, const char **argv) {
   std::string inputFile = argv[1];
   // init optix
   Context::init();
+  Scene::rgb2spectral = RGB2Spectral::load(SRC_DIR "/data/jakob_srgb.coeff");
   auto integrator = PathIntegratorBuilder().build();
   auto scene = SceneLoader().load(inputFile, *integrator);
 
