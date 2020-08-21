@@ -172,14 +172,23 @@ __device__ __forceinline__ float lerp(float a, float b, float t) {
   return a + t * (b - a);
 }
 
-// lambda lies in range [0, 1]
+__device__ __forceinline__ float inverse_lerp(float a, float b, float v) {
+  return (v - a) / (b - a);
+}
+
+__device__ __forceinline__ float clamp(float v, float a, float b) {
+  return max(min(v, b), a);
+}
+
+__device__ __forceinline__ float
+sample_array(float *data, uint32_t count, float u) {
+  uint32_t i = clamp(count * u, 0, count - 2);
+  return lerp(data[i], data[i + 1], saturate(count * u - i));
+}
+
 __device__ __forceinline__ float3 sample_xyz(float lambda) {
-  float indexF = lambda * (float)CMF_WaveLengthCount;
-  auto indexMin = min((size_t)(floor(indexF)), CMF_WaveLengthCount - 1);
-  auto indexMax = max((size_t)(ceil(indexF)), CMF_WaveLengthCount - 1);
-  float v = indexF - floor(indexF);
   auto sample_comp = [&](float *cmf) {
-    return lerp(cmf[indexMin], cmf[indexMax], v);
+    return sample_array(cmf, CMF_WaveLengthCount, lambda);
   };
   return make_float3(
       sample_comp(CMF_X), sample_comp(CMF_Y), sample_comp(CMF_Z));
