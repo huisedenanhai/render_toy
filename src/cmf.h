@@ -1,13 +1,14 @@
 #pragma once
+#include "defs.h"
 
 // 2-deg XYZ CMFs transformed from the CIE (2006) 2-deg LMS cone fundamentals
 // see http://cvrl.ioo.ucl.ac.uk/cmfs.htm
-__device__ size_t CMF_WaveLengthCount = 89;
-__device__ float CMF_MinWaveLength = 390.0f;
-__device__ float CMF_MaxWaveLength = 830.0f;
-__device__ float CMF_WaveLengthStride = 5.0f;
+HOST_DEVICE_DATA size_t CMF_WaveLengthCount = 89;
+HOST_DEVICE_DATA float CMF_MinWaveLength = 390.0f;
+HOST_DEVICE_DATA float CMF_MaxWaveLength = 830.0f;
+HOST_DEVICE_DATA float CMF_WaveLengthStride = 5.0f;
 
-__device__ float CMF_WaveLength[89] = {
+HOST_DEVICE_DATA float CMF_WaveLength[89] = {
     390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460,
     465, 470, 475, 480, 485, 490, 495, 500, 505, 510, 515, 520, 525, 530, 535,
     540, 545, 550, 555, 560, 565, 570, 575, 580, 585, 590, 595, 600, 605, 610,
@@ -16,7 +17,7 @@ __device__ float CMF_WaveLength[89] = {
     765, 770, 775, 780, 785, 790, 795, 800, 805, 810, 815, 820, 825, 830,
 };
 
-__device__ float CMF_X[89] = {
+HOST_DEVICE_DATA float CMF_X[89] = {
     0.00376965,  0.00938297,  0.022143,    0.0474299,   0.089538,
     0.144621,    0.203573,    0.248852,    0.291825,    0.322709,
     0.348255,    0.341848,    0.322464,    0.282665,    0.248525,
@@ -37,7 +38,7 @@ __device__ float CMF_X[89] = {
     4.25917e-06, 3.16777e-06, 2.35872e-06, 1.76247e-06,
 };
 
-__device__ float CMF_Y[89] = {
+HOST_DEVICE_DATA float CMF_Y[89] = {
     0.000414616, 0.00105965,  0.00245219,  0.00497172,  0.00907986,
     0.0142938,   0.0202737,   0.0261211,   0.0331904,   0.0415794,
     0.0503366,   0.0574339,   0.0647235,   0.0723834,   0.0851482,
@@ -58,7 +59,7 @@ __device__ float CMF_Y[89] = {
     1.69315e-06, 1.26256e-06, 9.42251e-07, 7.05386e-07,
 };
 
-__device__ float CMF_Z[89] = {
+HOST_DEVICE_DATA float CMF_Z[89] = {
     0.0184726,   0.0460978,   0.109609,    0.236925,    0.450837,
     0.737882,    1.05182,     1.30501,     1.55283,     1.74828,
     1.91748,     1.91844,     1.84854,     1.66444,     1.52216,
@@ -80,12 +81,12 @@ __device__ float CMF_Z[89] = {
 };
 
 // see https://colorcalculations.wordpress.com/rgb-color-spaces/#RGBspaces
-__device__ float XYZ_To_sRGB_Matrix[3][3] = {
+HOST_DEVICE_DATA float XYZ_To_sRGB_Matrix[3][3] = {
     {3.239886, -1.536869, -0.498444},
     {-0.967675, 1.872930, 0.041488},
     {0.056595, -0.207515, 1.075305}};
 
-__device__ float sRGB_To_XYZ_Matrix[3][3] = {
+HOST_DEVICE_DATA float sRGB_To_XYZ_Matrix[3][3] = {
     {0.412529, 0.358164, 0.177404},
     {0.212710, 0.716328, 0.070961},
     {0.019337, 0.119388, 0.934326}};

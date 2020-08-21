@@ -288,10 +288,11 @@ __device__ __forceinline__ Geometry get_geometry() {
 __device__ __forceinline__ void russian_roulette(RayPayload *prd) {
   // Russian Roulette
   // don't make the prob too small
-  auto continueRate = min(max(prd->weight, 0.03f), 1.0f);
-  bool rrFinish = prd->length >= 3 && rnd(prd->seed) > continueRate;
-  prd->finish = prd->length >= g_LaunchParams.maxPathLength || rrFinish;
-  prd->weight /= continueRate;
+  // auto continueRate = min(max(prd->weight, 0.03f), 1.0f);
+  // bool rrFinish = prd->length >= 3 && rnd(prd->seed) > continueRate;
+  // prd->finish = prd->length >= g_LaunchParams.maxPathLength || rrFinish;
+  // prd->weight /= continueRate;
+  prd->finish = prd->length >= g_LaunchParams.maxPathLength;
 }
 
 extern "C" __device__ void __closesthit__blackbody() {
@@ -299,6 +300,14 @@ extern "C" __device__ void __closesthit__blackbody() {
   auto data = (BlackBodyHitGroupData *)optixGetSbtDataPointer();
 
   prd->L += prd->weight * data->sample_spectrum_scaled(prd->waveLength);
+  // prd->L +=
+  //     prd->weight *
+  //     sample_array(
+  //         D65_SPD,
+  //         D65_WaveLengthCount,
+  //         inverse_lerp(D65_MinWaveLength, D65_MaxWaveLength,
+  //         prd->waveLength)) *
+  //     100;
   prd->finish = true;
 }
 

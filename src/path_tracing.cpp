@@ -18,8 +18,8 @@ inline float3 get_color(const std::shared_ptr<cpptoml::table> &data,
 inline float3 get_color_coeff(const std::shared_ptr<cpptoml::table> &data,
                               const std::string &key,
                               float3 defaultValue) {
-  auto coeff =
-      Scene::rgb2spectral->rgb_to_coeff(get_color(data, key, defaultValue));
+  auto color = get_color(data, key, defaultValue);
+  auto coeff = Scene::rgb2spectral->rgb_to_coeff(color);
   return coeff;
 }
 
