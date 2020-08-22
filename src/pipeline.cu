@@ -288,11 +288,12 @@ __device__ __forceinline__ Geometry get_geometry() {
 __device__ __forceinline__ void russian_roulette(RayPayload *prd) {
   // Russian Roulette
   // don't make the prob too small
-  // auto continueRate = min(max(prd->weight, 0.03f), 1.0f);
-  // bool rrFinish = prd->length >= 3 && rnd(prd->seed) > continueRate;
-  // prd->finish = prd->length >= g_LaunchParams.maxPathLength || rrFinish;
-  // prd->weight /= continueRate;
-  prd->finish = prd->length >= g_LaunchParams.maxPathLength;
+  bool enableRR = prd->length >= 3;
+  auto continueRate = enableRR ? min(max(prd->weight, 0.03f), 1.0f) : 1.0f;
+  bool rrFinish = enableRR && rnd(prd->seed) > continueRate;
+  prd->finish = prd->length >= g_LaunchParams.maxPathLength || rrFinish;
+  prd->weight /= continueRate;
+  // prd->finish = prd->length >= g_LaunchParams.maxPathLength;
 }
 
 extern "C" __device__ void __closesthit__blackbody() {
