@@ -207,10 +207,8 @@ __device__ __forceinline__ float3 sample_xyz(float lambda) {
 }
 
 __device__ __forceinline__ float sample_wave_length(float u, float &lambda) {
-  lambda = sample_array(CMF_InverseCDF, CMF_InverseCDFCount, u);
-  float pdf =
-      CMF_PDF[min((size_t)(CMF_PDFCount * lambda), CMF_PDFCount - 1)];
-  return pdf;
+  lambda = u;
+  return 1.0f;
 }
 
 __device__ __forceinline__ float eval_spectrum(const float3 &coeff,

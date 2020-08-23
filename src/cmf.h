@@ -111,6 +111,7 @@ __host__ __device__ inline float3 srgb_to_xyz(float3 srgb) {
                      m[2][0] * x + m[2][1] * y + m[2][2] * z);
 }
 
+// severe aliasing due to limited samples, don't use it.
 HOST_DEVICE_DATA size_t CMF_InverseCDFCount = 100;
 HOST_DEVICE_DATA float CMF_InverseCDF[100] = {
     0,        0.049228,  0.06085,   0.0691311, 0.0752347, 0.080993, 0.085921,
