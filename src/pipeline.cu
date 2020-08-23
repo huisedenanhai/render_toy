@@ -122,10 +122,11 @@ struct RayPayload {
   bool finish;
   Ray ray;
   int length;
-  float lambda;
-  float waveLength;
-  float weight;
-  float L;
+  float4 lambda;
+  float4 waveLength;
+  float4 weight;
+  float4 pdf;
+  float4 L;
   unsigned int seed;
 };
 
@@ -172,6 +173,17 @@ __device__ __forceinline__ float lerp(float a, float b, float t) {
   return a + t * (b - a);
 }
 
+__device__ __forceinline__ float4 lerp(float4 a, float4 b, float4 t) {
+  return make_float4(lerp(a.x, b.x, t.x),
+                     lerp(a.y, b.y, t.y),
+                     lerp(a.z, b.z, t.z),
+                     lerp(a.w, b.w, t.w));
+}
+
+__device__ __forceinline__ float4 lerp(float a, float b, float4 t) {
+  return lerp(make_float4(a, a, a, a), make_float4(b, b, b, b), t);
+}
+
 __device__ __forceinline__ float inverse_lerp(float a, float b, float v) {
   return (v - a) / (b - a);
 }
@@ -199,6 +211,14 @@ __device__ __forceinline__ float eval_spectrum(const float3 &coeff,
   return eval_rgb_to_spectral_coeff(coeff, waveLength);
 }
 
+__device__ __forceinline__ float4 eval_spectrum(const float3 &coeff,
+                                                float4 waveLength) {
+  return make_float4(eval_rgb_to_spectral_coeff(coeff, waveLength.x),
+                     eval_rgb_to_spectral_coeff(coeff, waveLength.y),
+                     eval_rgb_to_spectral_coeff(coeff, waveLength.z),
+                     eval_rgb_to_spectral_coeff(coeff, waveLength.w));
+}
+
 extern "C" __device__ void __raygen__entry() {
   auto pixelIndex = current_pixel();
   RayPayload prd{};
@@ -213,10 +233,12 @@ extern "C" __device__ void __raygen__entry() {
   for (int i = 0; i < spp; i++) {
     prd.finish = false;
     prd.length = 0;
-    prd.lambda = rnd(prd.seed);
+    prd.lambda =
+        make_float4(rnd(prd.seed), rnd(prd.seed), rnd(prd.seed), rnd(prd.seed));
     prd.waveLength = lerp(CMF_MinWaveLength, CMF_MaxWaveLength, prd.lambda);
-    prd.weight = 1.0f;
-    prd.L = 0.0f;
+    prd.weight = make_float4(1.0f, 1.0f, 1.0f, 1.0f);
+    prd.pdf = make_float4(1.0f, 1.0f, 1.0f, 1.0f);
+    prd.L = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 
     auto w = sample_camera_ray(i + 1, spp, prd.ray.origin, prd.ray.direction);
     const auto &scene = g_LaunchParams.scene;
@@ -239,7 +261,17 @@ extern "C" __device__ void __raygen__entry() {
                  p0,
                  p1);
     }
-    pixelColorXYZ += w * prd.L * sample_xyz(prd.lambda);
+    // CMIS
+    auto invSumPdf =
+        1.0f / max(prd.pdf.x + prd.pdf.y + prd.pdf.z + prd.pdf.w, 1e-7f);
+    pixelColorXYZ +=
+        w * prd.pdf.x * invSumPdf * prd.L.x * sample_xyz(prd.lambda.x);
+    pixelColorXYZ +=
+        w * prd.pdf.y * invSumPdf * prd.L.y * sample_xyz(prd.lambda.y);
+    pixelColorXYZ +=
+        w * prd.pdf.z * invSumPdf * prd.L.z * sample_xyz(prd.lambda.z);
+    pixelColorXYZ +=
+        w * prd.pdf.w * invSumPdf * prd.L.w * sample_xyz(prd.lambda.w);
   }
   pixelColorXYZ /= (float)spp;
   current_pixel_value() = xyz_to_srgb(pixelColorXYZ);
@@ -289,18 +321,22 @@ __device__ __forceinline__ void russian_roulette(RayPayload *prd) {
   // Russian Roulette
   // don't make the prob too small
   bool enableRR = prd->length >= 3;
-  auto continueRate = enableRR ? min(max(prd->weight, 0.03f), 1.0f) : 1.0f;
+  auto continueRate =
+      enableRR ? min(max(length(prd->weight), 0.03f), 1.0f) : 1.0f;
   bool rrFinish = enableRR && rnd(prd->seed) > continueRate;
   prd->finish = prd->length >= g_LaunchParams.maxPathLength || rrFinish;
   prd->weight /= continueRate;
-  // prd->finish = prd->length >= g_LaunchParams.maxPathLength;
 }
 
 extern "C" __device__ void __closesthit__blackbody() {
   auto prd = get_prd();
   auto data = (BlackBodyHitGroupData *)optixGetSbtDataPointer();
 
-  prd->L += prd->weight * data->sample_spectrum_scaled(prd->waveLength);
+  prd->L += prd->weight *
+            make_float4(data->sample_spectrum_scaled(prd->waveLength.x),
+                        data->sample_spectrum_scaled(prd->waveLength.y),
+                        data->sample_spectrum_scaled(prd->waveLength.z),
+                        data->sample_spectrum_scaled(prd->waveLength.w));
   // prd->L +=
   //     prd->weight *
   //     sample_array(
@@ -340,6 +376,7 @@ extern "C" __device__ void __closesthit__diffuse() {
   // attenuate factor, some terms are cancelled out as
   // hemisphere are cosine sampled
   prd->weight *= eval_spectrum(data->baseColorCoeff, prd->waveLength);
+  prd->pdf *= pdf;
 }
 
 extern "C" __device__ void __anyhit__diffuse() {}
@@ -371,8 +408,9 @@ extern "C" __device__ void __closesthit__glass() {
 
   auto base = ts.get_otho_base();
   float3 wi = base.world_to_local_dir(-prd->ray.direction);
+  // only consider hero ray
   float ior =
-      lerp(data->ior.waveLength390, data->ior.waveLength830, prd->lambda);
+      lerp(data->ior.waveLength390, data->ior.waveLength830, prd->lambda).x;
   float nT = wi.y > 0 ? ior : 1.0f / ior;
   float nI = 1.0f / nT;
   float cosI = abs(wi.y);
@@ -383,14 +421,17 @@ extern "C" __device__ void __closesthit__glass() {
   auto fReflect = fr;
   // we have fresnel(cosT, cosI, nI) == fresnel(cosI, cosT, nT)
   auto fRefract = (1.0f - fr) * nI * nI;
-  auto reflectRate = sinT > 1.0f ? 1.2f : fReflect / (fReflect + fRefract);
+  auto reflectRate = sinT > 1.0f ? 1.0f : fReflect / (fReflect + fRefract);
   auto reflectDirLocal = make_float3(-wi.x, wi.y, -wi.z);
   auto invLenXZ = 1.0f / max(sqrtf(wi.x * wi.x + wi.z * wi.z), 0.00001f);
   auto refractDirLocal = normalize(make_float3(-wi.x * sinT * invLenXZ,
                                                copysignf(cosT, -wi.y),
                                                -wi.z * sinT * invLenXZ));
-  auto nextDirLocal =
-      rnd(prd->seed) < reflectRate ? reflectDirLocal : refractDirLocal;
+
+  bool doReflect = rnd(prd->seed) <= reflectRate;
+  auto nextDirLocal = doReflect ? reflectDirLocal : refractDirLocal;
+  float pdf = doReflect ? reflectRate : 1.0f - reflectRate;
+
   auto nextDir = base.local_to_world_dir(nextDirLocal);
   // init next ray
   auto &scene = g_LaunchParams.scene;
@@ -399,7 +440,9 @@ extern "C" __device__ void __closesthit__glass() {
   prd->ray.direction = nextDir;
   prd->ray.min = scene.epsilon;
   prd->ray.max = scene.extent;
-  prd->weight *= eval_spectrum(data->baseColorCoeff, prd->waveLength);
+  prd->weight *= make_float4(
+      eval_spectrum(data->baseColorCoeff, prd->waveLength.x), 0.0f, 0.0f, 0.0f);
+  prd->pdf *= make_float4(pdf, 0.0f, 0.0f, 0.0f);
 }
 
 extern "C" __device__ void __anyhit__glass() {}
