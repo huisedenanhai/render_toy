@@ -206,6 +206,13 @@ __device__ __forceinline__ float3 sample_xyz(float lambda) {
       sample_comp(CMF_X), sample_comp(CMF_Y), sample_comp(CMF_Z));
 }
 
+__device__ __forceinline__ float sample_wave_length(float u, float &lambda) {
+  lambda = sample_array(CMF_InverseCDF, CMF_InverseCDFCount, u);
+  float pdf =
+      CMF_PDF[min((size_t)(CMF_PDFCount * lambda), CMF_PDFCount - 1)];
+  return pdf;
+}
+
 __device__ __forceinline__ float eval_spectrum(const float3 &coeff,
                                                float waveLength) {
   return eval_rgb_to_spectral_coeff(coeff, waveLength);
@@ -233,8 +240,15 @@ extern "C" __device__ void __raygen__entry() {
   for (int i = 0; i < spp; i++) {
     prd.finish = false;
     prd.length = 0;
-    prd.lambda =
-        make_float4(rnd(prd.seed), rnd(prd.seed), rnd(prd.seed), rnd(prd.seed));
+    float waveLengthLambda[4];
+    float waveLengthPDF[4];
+    for (int j = 0; j < 4; j++) {
+      waveLengthPDF[j] = sample_wave_length(rnd(prd.seed), waveLengthLambda[j]);
+    }
+    prd.lambda = make_float4(waveLengthLambda[0],
+                             waveLengthLambda[1],
+                             waveLengthLambda[2],
+                             waveLengthLambda[3]);
     prd.waveLength = lerp(CMF_MinWaveLength, CMF_MaxWaveLength, prd.lambda);
     prd.weight = make_float4(1.0f, 1.0f, 1.0f, 1.0f);
     prd.pdf = make_float4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -264,14 +278,14 @@ extern "C" __device__ void __raygen__entry() {
     // CMIS
     auto invSumPdf =
         1.0f / max(prd.pdf.x + prd.pdf.y + prd.pdf.z + prd.pdf.w, 1e-7f);
-    pixelColorXYZ +=
-        w * prd.pdf.x * invSumPdf * prd.L.x * sample_xyz(prd.lambda.x);
-    pixelColorXYZ +=
-        w * prd.pdf.y * invSumPdf * prd.L.y * sample_xyz(prd.lambda.y);
-    pixelColorXYZ +=
-        w * prd.pdf.z * invSumPdf * prd.L.z * sample_xyz(prd.lambda.z);
-    pixelColorXYZ +=
-        w * prd.pdf.w * invSumPdf * prd.L.w * sample_xyz(prd.lambda.w);
+    pixelColorXYZ += w * prd.pdf.x * invSumPdf * prd.L.x *
+                     sample_xyz(prd.lambda.x) / waveLengthPDF[0];
+    pixelColorXYZ += w * prd.pdf.y * invSumPdf * prd.L.y *
+                     sample_xyz(prd.lambda.y) / waveLengthPDF[1];
+    pixelColorXYZ += w * prd.pdf.z * invSumPdf * prd.L.z *
+                     sample_xyz(prd.lambda.z) / waveLengthPDF[2];
+    pixelColorXYZ += w * prd.pdf.w * invSumPdf * prd.L.w *
+                     sample_xyz(prd.lambda.w) / waveLengthPDF[3];
   }
   pixelColorXYZ /= (float)spp;
   current_pixel_value() = xyz_to_srgb(pixelColorXYZ);
