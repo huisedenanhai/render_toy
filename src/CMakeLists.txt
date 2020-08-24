@@ -36,6 +36,7 @@ add_executable(toy_exe
   main.cpp
   math_consts.h
   rotation.h
+  cmf.h
   context.h
   context.cpp
   scene.h

@@ -8,6 +8,8 @@
 
 using namespace dev;
 
+// #define USE_CMF_IMPORTANCE_SAMPLING
+
 extern "C" {
 __constant__ LaunchParams g_LaunchParams;
 }
@@ -206,9 +208,52 @@ __device__ __forceinline__ float3 sample_xyz(float lambda) {
       sample_comp(CMF_X), sample_comp(CMF_Y), sample_comp(CMF_Z));
 }
 
-__device__ __forceinline__ float sample_wave_length(float u, float &lambda) {
-  lambda = u;
-  return 1.0f;
+// sample two iid normal dist values from two uniform samples in range(0, 1)
+// http://bjlkeng.github.io/posts/sampling-from-a-normal-distribution/
+__device__ __forceinline__ float2 box_muller(float u, float v) {
+  float r = sqrtf(max(-2.0f * logf(max(1e-9f, u)), 0.0f));
+  float t = 2.0f * Pi * v;
+  return make_float2(r * cosf(t), r * sinf(t));
+}
+
+// map a value from N(0, 1) to N(mean, stdvar)
+// distribution
+__device__ __forceinline__ float
+normal_dist_remap(float v, float mean, float stdvar) {
+  return v * stdvar + mean;
+}
+
+__device__ __forceinline__ float
+normal_dist_pdf(float v, float mean, float stdvar) {
+  float vNorm = (v - mean) / stdvar;
+  return expf(-vNorm * vNorm * 0.5f) / sqrtf(2.0f * Pi) / stdvar;
+}
+
+__device__ __forceinline__ void
+sample_wave_length(unsigned int &seed, float lambda[4], float pdf[4]) {
+#ifdef USE_CMF_IMPORTANCE_SAMPLING
+  float normalDist[4];
+  for (int i = 0; i < 4; i += 2) {
+    auto ns = box_muller(rnd(seed), rnd(seed));
+    normalDist[i] = ns.x;
+    normalDist[i + 1] = ns.y;
+  }
+  for (int i = 0; i < 4; i++) {
+    float rate = CMF_FitA1 / (CMF_FitA1 + CMF_FitA2);
+    float choose1 = rnd(seed) < rate;
+    float average = choose1 ? CMF_FitMean1 : CMF_FitMean2;
+    float stdvar = choose1 ? CMF_FitStdVar1 : CMF_FitStdVar2;
+    float l = saturate(normal_dist_remap(normalDist[i], average, stdvar));
+    lambda[i] = l;
+    pdf[i] = normal_dist_pdf(l, CMF_FitMean1, CMF_FitStdVar1) * CMF_FitA1 +
+             normal_dist_pdf(l, CMF_FitMean2, CMF_FitStdVar2) * CMF_FitA2;
+  }
+#else
+  for (int i = 0; i < 4; i++) {
+    lambda[i] = rnd(seed);
+    pdf[i] = 1.0f;
+  }
+#endif
 }
 
 __device__ __forceinline__ float eval_spectrum(const float3 &coeff,
@@ -240,9 +285,7 @@ extern "C" __device__ void __raygen__entry() {
     prd.length = 0;
     float waveLengthLambda[4];
     float waveLengthPDF[4];
-    for (int j = 0; j < 4; j++) {
-      waveLengthPDF[j] = sample_wave_length(rnd(prd.seed), waveLengthLambda[j]);
-    }
+    sample_wave_length(prd.seed, waveLengthLambda, waveLengthPDF);
     prd.lambda = make_float4(waveLengthLambda[0],
                              waveLengthLambda[1],
                              waveLengthLambda[2],
