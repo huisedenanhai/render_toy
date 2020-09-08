@@ -163,6 +163,87 @@ int run(int argc, const char **argv) {
       }
     }
   }
+  // denoise
+  if (scene.frame.denoise) {
+    OptixDenoiser denoiser;
+    {
+      OptixDenoiserOptions denoiserOpts{};
+      denoiserOpts.inputKind = OPTIX_DENOISER_INPUT_RGB;
+      TOY_OPTIX_CHECK_OR_THROW(
+          optixDenoiserCreate(Context::context, &denoiserOpts, &denoiser), );
+      TOY_OPTIX_CHECK_OR_THROW(
+          optixDenoiserSetModel(
+              denoiser, OPTIX_DENOISER_MODEL_KIND_HDR, nullptr, 0), );
+    }
+    OptixDenoiserSizes denoiserSizes;
+    TOY_OPTIX_CHECK_OR_THROW(
+        optixDenoiserComputeMemoryResources(
+            denoiser, frameWidth, frameHeight, &denoiserSizes), );
+
+    CudaMemoryRAII intensity_d{};
+    CudaMemoryRAII scratch_d{};
+    CudaMemoryRAII state_d{};
+    size_t scratchSize = denoiserSizes.withoutOverlapScratchSizeInBytes;
+    size_t stateSize = denoiserSizes.stateSizeInBytes;
+    TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&intensity_d.ptr, sizeof(float)), );
+    TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&scratch_d.ptr, scratchSize), );
+    TOY_CUDA_CHECK_OR_THROW(cudaMalloc(&state_d.ptr, stateSize), );
+
+    CudaMemoryRAII denoisedFrame_d{};
+    TOY_CUDA_CHECK_OR_THROW(
+        cudaMalloc(&denoisedFrame_d.ptr,
+                   frameWidth * frameHeight * 3 * sizeof(float)), );
+    TOY_OPTIX_CHECK_OR_THROW(optixDenoiserSetup(denoiser,
+                                                0,
+                                                frameWidth,
+                                                frameHeight,
+                                                (CUdeviceptr)state_d.ptr,
+                                                stateSize,
+                                                (CUdeviceptr)scratch_d.ptr,
+                                                scratchSize), );
+    OptixImage2D inputFrame;
+    inputFrame.data = (CUdeviceptr)outputFrameBuffer.ptr;
+    inputFrame.width = frameWidth;
+    inputFrame.height = frameHeight;
+    inputFrame.rowStrideInBytes = frameWidth * 3 * sizeof(float);
+    inputFrame.pixelStrideInBytes = 3 * sizeof(float);
+    inputFrame.format = OPTIX_PIXEL_FORMAT_FLOAT3;
+
+    OptixImage2D denoisedFrame;
+    denoisedFrame.data = (CUdeviceptr)denoisedFrame_d.ptr;
+    denoisedFrame.width = frameWidth;
+    denoisedFrame.height = frameHeight;
+    denoisedFrame.rowStrideInBytes = frameWidth * 3 * sizeof(float);
+    denoisedFrame.pixelStrideInBytes = 3 * sizeof(float);
+    denoisedFrame.format = OPTIX_PIXEL_FORMAT_FLOAT3;
+
+    TOY_OPTIX_CHECK_OR_THROW(
+        optixDenoiserComputeIntensity(denoiser,
+                                      0,
+                                      &inputFrame,
+                                      (CUdeviceptr)intensity_d.ptr,
+                                      (CUdeviceptr)scratch_d.ptr,
+                                      scratchSize), );
+    OptixDenoiserParams denoiseParams;
+    denoiseParams.denoiseAlpha = 0;
+    denoiseParams.hdrIntensity = (CUdeviceptr)intensity_d.ptr;
+    denoiseParams.blendFactor = 0.0f;
+    TOY_OPTIX_CHECK_OR_THROW(optixDenoiserInvoke(denoiser,
+                                                 0,
+                                                 &denoiseParams,
+                                                 (CUdeviceptr)state_d.ptr,
+                                                 stateSize,
+                                                 &inputFrame,
+                                                 1,
+                                                 0,
+                                                 0,
+                                                 &denoisedFrame,
+                                                 (CUdeviceptr)scratch_d.ptr,
+                                                 scratchSize), );
+
+    std::swap(denoisedFrame_d, outputFrameBuffer);
+    optixDenoiserDestroy(denoiser);
+  }
   // write image to output
   {
     auto elemCnt = frameWidth * frameHeight * 3;

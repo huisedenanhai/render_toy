@@ -21,6 +21,7 @@ struct Scene {
     unsigned int resolution = 1000;
     bool hdr = true;
     float exposure = 1.0f;
+    bool denoise = false;
   };
 
   struct Tile {
