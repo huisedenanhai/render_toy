@@ -3,6 +3,9 @@
 #include <optix.h>
 
 namespace dev {
+
+enum RayType { RayTypeCamera, RayTypeLight, RayTypeShadow, RayTypeCount };
+
 // coordinate setting:
 // right hand coordinate, y points upward
 // for 2d space, origin point is at left bottom, y points up, x points right
@@ -103,10 +106,16 @@ struct DiffuseHitGroupData {
 
 struct GlassHitGroupData {
   float3 baseColorCoeff;
-  struct IOR {
-    float waveLength390;
-    float waveLength830;
-  } ior;
+  float ior;
+  // factor controlling dispersion
+  // see https://en.wikipedia.org/wiki/Cauchy%27s_equation
+  float cauchy;
+
+  __host__ __device__ inline float get_ior(float waveLength_nm) {
+    auto waveLength_um = waveLength_nm * 1e-3f;
+    auto waveLength_um2 = waveLength_um * waveLength_um;
+    return ior + cauchy / waveLength_um2;
+  }
 };
 
 struct BlackBodyHitGroupData {

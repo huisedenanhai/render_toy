@@ -2,9 +2,9 @@
 id = "Glass.b4648a2e-5fd0-6f66-6e6b-ac769f38e53f"
 type = "glass"
 baseColor = [1.0, 1.0, 1.0]
-[material.ior]
-waveLength390 = 1.7
-waveLength830 = 1.3
+# it looks cool, fine
+ior = 1.19228
+cauchy = 0.0533142
 
 [[material]]
 id = "Ground.f234332a-92a5-9230-d672-30a767756e9b"

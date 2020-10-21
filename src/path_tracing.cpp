@@ -50,16 +50,8 @@ void PathGlassMaterial::add_hit_record(
     const std::shared_ptr<cpptoml::table> &data) {
   auto record = builder.add_hit_record<dev::GlassHitGroupData>(index);
   auto defaultIOR = 1.45f;
-  auto iorT = data->get_table("ior");
-  if (iorT) {
-    record->ior.waveLength390 =
-        iorT->get_as<double>("waveLength390").value_or(defaultIOR);
-    record->ior.waveLength830 =
-        iorT->get_as<double>("waveLength830").value_or(defaultIOR);
-  } else {
-    record->ior.waveLength390 = record->ior.waveLength830 =
-        data->get_as<double>("ior").value_or(defaultIOR);
-  }
+  record->ior = data->get_as<double>("ior").value_or(defaultIOR);
+  record->cauchy = data->get_as<double>("cauchy").value_or(0.0);
   record->baseColorCoeff =
       get_color_coeff(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
 }

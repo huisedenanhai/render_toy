@@ -123,6 +123,7 @@ struct Ray {
 struct RayPayload {
   bool finish;
   Ray ray;
+  RayType type;
   int length;
   float4 lambda;
   float4 waveLength;
@@ -283,6 +284,7 @@ extern "C" __device__ void __raygen__entry() {
   for (int i = 0; i < spp; i++) {
     prd.finish = false;
     prd.length = 0;
+    prd.type = RayTypeCamera;
     float waveLengthLambda[4];
     float waveLengthPDF[4];
     sample_wave_length(prd.seed, waveLengthLambda, waveLengthPDF);
@@ -464,8 +466,7 @@ extern "C" __device__ void __closesthit__glass() {
   auto base = ts.get_otho_base();
   float3 wi = base.world_to_local_dir(-prd->ray.direction);
   // only consider hero ray
-  float ior =
-      lerp(data->ior.waveLength390, data->ior.waveLength830, prd->lambda).x;
+  float ior = data->get_ior(prd->waveLength.x);
   float nT = wi.y > 0 ? ior : 1.0f / ior;
   float nI = 1.0f / nT;
   float cosI = abs(wi.y);
@@ -495,9 +496,19 @@ extern "C" __device__ void __closesthit__glass() {
   prd->ray.direction = nextDir;
   prd->ray.min = scene.epsilon;
   prd->ray.max = scene.extent;
-  prd->weight *= make_float4(
-      eval_spectrum(data->baseColorCoeff, prd->waveLength.x), 0.0f, 0.0f, 0.0f);
-  prd->pdf *= make_float4(pdf, 0.0f, 0.0f, 0.0f);
+  if (data->cauchy != 0) {
+    // other wavelength has no contribution when dispersion happens
+    prd->weight *=
+        make_float4(eval_spectrum(data->baseColorCoeff, prd->waveLength.x),
+                    0.0f,
+                    0.0f,
+                    0.0f);
+    prd->pdf *= make_float4(pdf, 0.0f, 0.0f, 0.0f);
+  } else {
+    // no dispersion
+    prd->weight *= eval_spectrum(data->baseColorCoeff, prd->waveLength);
+    prd->pdf *= pdf;
+  }
 }
 
 extern "C" __device__ void __anyhit__glass() {}
