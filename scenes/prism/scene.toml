@@ -1,5 +1,5 @@
 [launch]
-spp = 1000
+spp = 1
 maxPathLength = 30
 
 [frame]
@@ -9,7 +9,7 @@ resolution = 1000
 #hdr = true
 hdr = false
 exposure = 1.0
-denoise = false
+denoise = true
 
 [tile]
 width = 64

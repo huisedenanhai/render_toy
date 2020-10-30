@@ -99,7 +99,8 @@ std::unique_ptr<IIntegrator> PathIntegratorBuilder::build() {
 
   std::vector<HitGroupEntry> hitGroups;
   // built in hit groups
-  hitGroups.emplace_back("__shadow", "__closesthit__shadow", "__anyhit__shadow", nullptr);
+  hitGroups.emplace_back(
+      "__shadow", "__closesthit__shadow", "__anyhit__shadow", nullptr);
   hitGroups.emplace_back("__geometry_query",
                          "__closesthit__geometry_query",
                          std::nullopt,

@@ -54,9 +54,9 @@ __device__ __forceinline__ float radical_inverse_base_2(uint32_t n) {
   return saturate(reverse_bits_32(n) * float(2.3283064365386963e-10));
 }
 
-// 0 < i <= n
+// 0 <= i < n
 __device__ __forceinline__ float2 hammersley_sample(uint32_t i, uint32_t n) {
-  return make_float2((float)(i) / (float)(n), radical_inverse_base_2(i));
+  return make_float2((float)(i + 1) / (float)(n), radical_inverse_base_2(i));
 }
 
 __device__ __forceinline__ float sample_camera_ray_with_jitter(
@@ -78,7 +78,7 @@ __device__ __forceinline__ float sample_camera_ray_with_jitter(
   return 1.0f; // w / pdf
 }
 
-// 0 < n <= spp
+// 0 <= n < spp
 __device__ __forceinline__ float
 sample_camera_ray(uint32_t n, uint32_t spp, float3 &origin, float3 &direction) {
   auto jitter = hammersley_sample(n, spp);
@@ -312,22 +312,16 @@ struct RayPayload {
 };
 
 struct ShadowPayload {
-  bool hit;
+  bool visible;
 };
 
-extern "C" __device__ void __closesthit__shadow() {
-  auto prd = get_prd<ShadowPayload>();
-  prd->hit = true;
-}
+extern "C" __device__ void __closesthit__shadow() {}
 
-extern "C" __device__ void __anyhit__shadow() {
-  // auto prd = get_prd<ShadowPayload>();
-  // prd->hit = true;
-  // printf("anyhit\n");
-  // optixTerminateRay();
-}
+extern "C" __device__ void __anyhit__shadow() {}
 
-extern "C" __device__ void __miss__shadow() {}
+extern "C" __device__ void __miss__shadow() {
+  get_prd<ShadowPayload>()->visible = true;
+}
 
 struct GeometryQueryResult {
   bool hit;
@@ -354,10 +348,10 @@ query_geometry(const float3 &from, const float3 &wo, float tMax) {
   optixTrace(scene.gas,
              from,
              wo,
-             scene.epsilon, // tmin
-             tMax,          // tmax
-             0,             // ray time
-             255,           // mask
+             0,    // tmin
+             tMax, // tmax
+             0,    // ray time
+             255,  // mask
              OPTIX_RAY_FLAG_NONE,
              GeometryQueryHitRecordIndex,  // sbt offset
              0,                            // sbt stride
@@ -374,31 +368,32 @@ is_visible(const float3 &from, const float3 &wo, float tMax) {
   unsigned int p0, p1;
   unpack_ptr(&prd, p0, p1);
 
-  prd.hit = false;
+  prd.visible = false;
 
   auto &scene = g_LaunchParams.scene;
   optixTrace(scene.gas,
              from,
              wo,
-             scene.epsilon, // tmin
-             tMax,          // tmax
-             0,             // ray time
-             255,           // mask
-             OPTIX_RAY_FLAG_NONE,
+             0,    // tmin
+             tMax, // tmax
+             0,    // ray time
+             255,  // mask
+             OPTIX_RAY_FLAG_DISABLE_ANYHIT |
+                 OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT |
+                 OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT,
              ShadowHitRecordIndex,  // sbt offset
              0,                     // sbt stride
              ShadowMissRecordIndex, // miss index
              p0,
              p1);
 
-  return !prd.hit;
+  return prd.visible;
 }
 
 __device__ __forceinline__ bool is_visible(const float3 &from,
                                            const float3 &to) {
-  auto &scene = g_LaunchParams.scene;
   auto wo = normalize(to - from);
-  auto dist = max(length(to - from) - scene.epsilon, scene.epsilon);
+  auto dist = length(to - from);
   return is_visible(from, wo, dist);
 }
 
@@ -446,7 +441,7 @@ extern "C" __device__ void __raygen__path_tracing() {
     prd.pdf = make_float4(1.0f, 1.0f, 1.0f, 1.0f);
     prd.L = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    auto w = sample_camera_ray(i + 1, spp, prd.ray.origin, prd.ray.direction);
+    auto w = sample_camera_ray(i, spp, prd.ray.origin, prd.ray.direction);
     const auto &scene = g_LaunchParams.scene;
     prd.ray.min = scene.epsilon;
     prd.ray.max = scene.extent;
@@ -619,34 +614,33 @@ extern "C" __device__ void __closesthit__glass() {
 
 extern "C" __device__ void __raygen__ao() {
   auto &scene = g_LaunchParams.scene;
+  auto spp = g_LaunchParams.spp;
 
-  float3 rayOrigin;
-  float3 rayDir;
-
-  sample_camera_ray_with_jitter(make_float2(0, 0), rayOrigin, rayDir);
-
-  auto intersect = query_geometry(rayOrigin, rayDir, scene.extent);
-  current_pixel_value() = intersect.geom.ts.origin;
-  // return;
+  auto pixelIndex = current_pixel();
+  auto seed = tea<4>(pixel_index(pixelIndex), 114514);
 
   float ao = 0;
-  if (intersect.hit) {
-    auto spp = g_LaunchParams.spp;
-    auto ts = intersect.geom.ts;
-    auto base = ts.get_otho_base();
-    base.y = faceforward(base.y, -rayDir, base.y);
-    for (int i = 0; i < spp; i++) {
-      auto sample = hammersley_sample(i, spp);
+  for (int i = 0; i < spp; i++) {
+    float3 rayOrigin;
+    float3 rayDir;
+    auto w = sample_camera_ray(i, spp, rayOrigin, rayDir);
+
+    auto intersect = query_geometry(rayOrigin, rayDir, scene.extent);
+
+    if (intersect.hit) {
+      auto ts = intersect.geom.ts;
+      auto base = ts.get_otho_base();
+      base.y = faceforward(base.y, -rayDir, base.y);
       float3 localDir;
-      cosine_sample_hemisphere(sample.x, sample.y, localDir);
+      cosine_sample_hemisphere(seed, localDir);
 
       ao += is_visible(ts.origin + base.y * scene.epsilon,
                        base.local_to_world_dir(localDir),
                        10.0f)
-                ? 1.0f
+                ? w
                 : 0.0f;
     }
-    ao /= (float)spp;
   }
+  ao /= (float)spp;
   current_pixel_value() = make_float3(ao, ao, ao);
 }
