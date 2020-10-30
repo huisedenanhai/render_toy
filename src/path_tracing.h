@@ -28,7 +28,7 @@ public:
 
 class PathIntegrator : public IIntegrator {
 public:
-  virtual ShaderBindingTableBuilder
+ virtual ShaderBindingTableBuilder
   get_stb_builder(const std::shared_ptr<cpptoml::table> &toml) override;
 };
 

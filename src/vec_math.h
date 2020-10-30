@@ -1,9 +1,10 @@
 #pragma once
 
-#include "math_consts.h"
 #include "defs.h"
+#include "math_consts.h"
 #include <cmath>
 #include <type_traits>
+
 
 // multiply
 HOST_DEVICE_INLINE float3 operator*(const float3 &a, const float3 &b) {
@@ -203,7 +204,7 @@ HOST_DEVICE_INLINE float3 cross(const float3 &a, const float3 &b) {
 }
 
 HOST_DEVICE_INLINE float3 faceforward(const float3 &n,
-                                               const float3 &i,
-                                               const float3 &nref) {
+                                      const float3 &i,
+                                      const float3 &nref) {
   return n * copysignf(1.0f, dot(i, nref));
 }

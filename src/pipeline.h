@@ -4,6 +4,21 @@
 
 namespace dev {
 
+static constexpr unsigned int ShadowHitProgramGroupIndex = 0;
+static constexpr unsigned int GeometryQueryHitProgramGroupIndex = 1;
+
+static constexpr unsigned int ShadowMissProgramGroupIndex = 0;
+static constexpr unsigned int GeometryQueryMissProgramGroupIndex = 1;
+static constexpr unsigned int MaterialMissProgramGroupIndex = 2;
+
+static constexpr unsigned int ShadowHitRecordIndex = 0;
+static constexpr unsigned int GeometryQueryHitRecordIndex = 1;
+static constexpr unsigned int MaterialHitRecordOffset = 2;
+
+static constexpr unsigned int ShadowMissRecordIndex = 0;
+static constexpr unsigned int GeometryQueryMissRecordIndex = 1;
+static constexpr unsigned int MaterialMissRecordIndex = 2;
+
 enum RayType { RayTypeCamera, RayTypeLight, RayTypeShadow, RayTypeCount };
 
 // coordinate setting:

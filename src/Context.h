@@ -4,6 +4,7 @@
 #include "exceptions.h"
 #include <iostream>
 #include <map>
+#include <optional>
 #include <optix.h>
 #include <optix_function_table.h>
 #include <optix_stubs.h>
@@ -78,36 +79,40 @@ struct Pipeline {
 
 // order of adding will be preserved
 struct PipelineBuilder {
-  PipelineBuilder &set_launch_params(const std::string &name);
-  // these programs groups are supposed to be directly mapped to the concept of
-  // material
-  PipelineBuilder &add_raygen_group(const std::string &module,
-                                    const std::string &entry);
-  PipelineBuilder &add_exception_group(const std::string &module,
-                                       const std::string &entry);
-  PipelineBuilder &add_miss_group(const std::string &module,
-                                  const std::string &entry);
-  PipelineBuilder &add_hit_group(const std::string &moduleCH,
-                                 const std::string &entryCH,
-                                 const std::string &moduleAH,
-                                 const std::string &entryAH);
-  Pipeline build();
-
   struct Group {
     std::string module;
     std::string entry;
   };
 
+  // explicitly mark unused program as null won't make the program run faster,
+  // though.
   struct HitGroup {
-    Group closestHit;
-    Group anyHit;
+    std::optional<Group> closestHit;
+    std::optional<Group> anyHit;
   };
 
-  std::string launchParams;
-  std::vector<Group> raygenGroups;
-  std::vector<Group> exceptionGroups;
-  std::vector<Group> missGroups;
-  std::vector<HitGroup> hitGroups;
+  PipelineBuilder &set_launch_params(const std::string &name);
+  // these programs groups are supposed to be directly mapped to the concept of
+  // material
+  PipelineBuilder &add_raygen_group(const std::string &module,
+                                    const std::string &entry);
+
+  PipelineBuilder &add_exception_group(const std::string &module,
+                                       const std::string &entry);
+
+  PipelineBuilder &add_miss_group(const std::string &module,
+                                  const std::string &entry);
+
+  PipelineBuilder &add_hit_group(HitGroup hitGroup);
+
+  Pipeline build();
+
+private:
+  std::string _launchParams;
+  std::vector<Group> _raygenGroups;
+  std::vector<Group> _exceptionGroups;
+  std::vector<Group> _missGroups;
+  std::vector<HitGroup> _hitGroups;
 };
 
 template <typename T> struct alignas(OPTIX_SBT_RECORD_ALIGNMENT) Record {
@@ -192,6 +197,16 @@ struct ShaderBindingTableBuilder {
     return &record->data;
   }
 
+  void add_record_no_data(unsigned int groupIndex, unsigned int index) {
+    struct NoData {};
+    auto record = new Record<NoData>;
+    TOY_OPTIX_CHECK_OR_THROW(
+        optixSbtRecordPackHeader(pipeline->groups[groupIndex][index],
+                                 record), );
+
+    records[groupIndex].emplace_back(record);
+  }
+
   template <typename T> T *add_raygen_record(unsigned int index) {
     return add_record<T>(Pipeline::raygenGroupIndex, index);
   }
@@ -206,6 +221,26 @@ struct ShaderBindingTableBuilder {
 
   template <typename T> T *add_hit_record(unsigned int index) {
     return add_record<T>(Pipeline::hitGroupIndex, index);
+  }
+
+  void add_raygen_record_no_data(unsigned int index) {
+    add_record_no_data(Pipeline::raygenGroupIndex, index);
+  }
+
+  void add_miss_record_no_data(unsigned int index) {
+    add_record_no_data(Pipeline::missGroupIndex, index);
+  }
+
+  void add_exception_record_no_data(unsigned int index) {
+    add_record_no_data(Pipeline::exceptionGroupIndex, index);
+  }
+
+  void add_hit_record_no_data(unsigned int index) {
+    add_record_no_data(Pipeline::hitGroupIndex, index);
+  }
+
+  size_t get_hit_record_count() {
+    return records[Pipeline::hitGroupIndex].size();
   }
 
   ShaderBindingTable build();

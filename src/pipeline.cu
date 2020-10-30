@@ -59,19 +59,16 @@ __device__ __forceinline__ float2 hammersley_sample(uint32_t i, uint32_t n) {
   return make_float2((float)(i) / (float)(n), radical_inverse_base_2(i));
 }
 
-// 0 < i <= spp
-__device__ __forceinline__ float
-sample_camera_ray(uint32_t n, uint32_t spp, float3 &origin, float3 &direction) {
+__device__ __forceinline__ float sample_camera_ray_with_jitter(
+    float2 jitter, float3 &origin, float3 &direction) {
   const auto &cam = g_LaunchParams.camera;
   const auto &frame = g_LaunchParams.outputFrame;
   auto width = (float)frame.width;
   auto height = (float)frame.height;
   auto pixelIndex = current_pixel();
   auto pixel = make_float2(pixelIndex.x, pixelIndex.y);
-  // jitter pixel position
-  auto sample = hammersley_sample(n, spp);
-  pixel.x += sample.x;
-  pixel.y += sample.y;
+  pixel.x += jitter.x;
+  pixel.y += jitter.y;
 
   auto canvasXY = rect_lerp(cam.canvas, pixel.x / width, pixel.y / height);
   auto dir = cam.right * canvasXY.x + cam.up * canvasXY.y - cam.back;
@@ -79,6 +76,13 @@ sample_camera_ray(uint32_t n, uint32_t spp, float3 &origin, float3 &direction) {
   origin = cam.position;
   direction = normalize(dir);
   return 1.0f; // w / pdf
+}
+
+// 0 < n <= spp
+__device__ __forceinline__ float
+sample_camera_ray(uint32_t n, uint32_t spp, float3 &origin, float3 &direction) {
+  auto jitter = hammersley_sample(n, spp);
+  return sample_camera_ray_with_jitter(jitter, origin, direction);
 }
 
 // forms a xyz right hand coord
@@ -113,25 +117,32 @@ struct TangentSpace {
   }
 };
 
-struct Ray {
-  float3 origin;
-  float min;
-  float3 direction;
-  float max;
+struct Geometry {
+  unsigned int primId;
+  float2 uv;
+  float3 v[3];
+  TangentSpace ts;
 };
 
-struct RayPayload {
-  bool finish;
-  Ray ray;
-  RayType type;
-  int length;
-  float4 lambda;
-  float4 waveLength;
-  float4 weight;
-  float4 pdf;
-  float4 L;
-  unsigned int seed;
-};
+__device__ __forceinline__ Geometry get_geometry() {
+  Geometry geom;
+  // init geom
+  auto primId = optixGetPrimitiveIndex();
+  auto gas = optixGetGASTraversableHandle();
+  auto uv = optixGetTriangleBarycentrics();
+  optixGetTriangleVertexData(gas, primId, 0, 0, geom.v);
+  geom.primId = primId;
+  geom.uv = uv;
+  float3 *v = geom.v;
+
+  // calculate tangent space
+  TangentSpace &ts = geom.ts;
+  ts.origin = v[0] * (1 - uv.x - uv.y) + v[1] * uv.x + v[2] * uv.y;
+  ts.dpdu = v[1] - v[0];
+  ts.dpdv = v[2] - v[0];
+  ts.n = normalize(cross(ts.dpdu, ts.dpdv));
+  return geom;
+}
 
 __device__ __forceinline__ void
 unpack_ptr(void *ptr, unsigned int &p0, unsigned int &p1) {
@@ -144,15 +155,15 @@ __device__ __forceinline__ void *pack_ptr(unsigned int p0, unsigned int p1) {
   return (void *)p;
 }
 
-__device__ __forceinline__ RayPayload *get_prd() {
-  return (RayPayload *)pack_ptr(optixGetPayload_0(), optixGetPayload_1());
+template <typename T> __device__ __forceinline__ T *get_prd() {
+  return (T *)pack_ptr(optixGetPayload_0(), optixGetPayload_1());
 }
 
 // y goes upward
 __device__ __forceinline__ float
-uniform_sample_hemisphere(unsigned int &randState, float3 &d) {
-  auto theta = 2.0f * Pi * rnd(randState);
-  auto y = rnd(randState);
+uniform_sample_hemisphere(float u, float v, float3 &d) {
+  auto theta = 2.0f * Pi * u;
+  auto y = v;
   auto r = sqrtf(max(0.0f, 1.0f - y * y));
   d.x = r * cosf(theta);
   d.y = y;
@@ -160,16 +171,26 @@ uniform_sample_hemisphere(unsigned int &randState, float3 &d) {
   return 0.5f * InvPi;
 }
 
+__device__ __forceinline__ float
+uniform_sample_hemisphere(unsigned int &randState, float3 &d) {
+  return uniform_sample_hemisphere(rnd(randState), rnd(randState), d);
+}
+
 // y goes upward
 __device__ __forceinline__ float
-cosine_sample_hemisphere(unsigned int &randState, float3 &d) {
-  auto theta = 2.0f * Pi * rnd(randState);
-  auto r = sqrtf(rnd(randState));
+cosine_sample_hemisphere(float u, float v, float3 &d) {
+  auto theta = 2.0f * Pi * u;
+  auto r = sqrtf(v);
   auto y = sqrtf(max(1 - r * r, 0.0f));
   d.x = r * cosf(theta);
   d.y = y;
   d.z = r * sinf(theta);
   return y * InvPi;
+}
+
+__device__ __forceinline__ float
+cosine_sample_hemisphere(unsigned int &randState, float3 &d) {
+  return cosine_sample_hemisphere(rnd(randState), rnd(randState), d);
 }
 
 __device__ __forceinline__ float lerp(float a, float b, float t) {
@@ -270,13 +291,141 @@ __device__ __forceinline__ float4 eval_spectrum(const float3 &coeff,
                      eval_rgb_to_spectral_coeff(coeff, waveLength.w));
 }
 
-extern "C" __device__ void __raygen__entry() {
+struct Ray {
+  float3 origin;
+  float min;
+  float3 direction;
+  float max;
+};
+
+struct RayPayload {
+  bool finish;
+  Ray ray;
+  RayType type;
+  int length;
+  float4 lambda;
+  float4 waveLength;
+  float4 weight;
+  float4 pdf;
+  float4 L;
+  unsigned int seed;
+};
+
+struct ShadowPayload {
+  bool hit;
+};
+
+extern "C" __device__ void __closesthit__shadow() {
+  auto prd = get_prd<ShadowPayload>();
+  prd->hit = true;
+}
+
+extern "C" __device__ void __anyhit__shadow() {
+  // auto prd = get_prd<ShadowPayload>();
+  // prd->hit = true;
+  // printf("anyhit\n");
+  // optixTerminateRay();
+}
+
+extern "C" __device__ void __miss__shadow() {}
+
+struct GeometryQueryResult {
+  bool hit;
+  Geometry geom;
+};
+
+extern "C" __device__ void __closesthit__geometry_query() {
+  auto prd = get_prd<GeometryQueryResult>();
+  prd->hit = true;
+  prd->geom = get_geometry();
+}
+
+extern "C" __device__ void __miss__geometry_query() {}
+
+__device__ __forceinline__ GeometryQueryResult
+query_geometry(const float3 &from, const float3 &wo, float tMax) {
+  GeometryQueryResult prd{};
+  unsigned int p0, p1;
+  unpack_ptr(&prd, p0, p1);
+
+  prd.hit = false;
+
+  auto &scene = g_LaunchParams.scene;
+  optixTrace(scene.gas,
+             from,
+             wo,
+             scene.epsilon, // tmin
+             tMax,          // tmax
+             0,             // ray time
+             255,           // mask
+             OPTIX_RAY_FLAG_NONE,
+             GeometryQueryHitRecordIndex,  // sbt offset
+             0,                            // sbt stride
+             GeometryQueryMissRecordIndex, // miss index
+             p0,
+             p1);
+
+  return prd;
+}
+
+__device__ __forceinline__ bool
+is_visible(const float3 &from, const float3 &wo, float tMax) {
+  ShadowPayload prd{};
+  unsigned int p0, p1;
+  unpack_ptr(&prd, p0, p1);
+
+  prd.hit = false;
+
+  auto &scene = g_LaunchParams.scene;
+  optixTrace(scene.gas,
+             from,
+             wo,
+             scene.epsilon, // tmin
+             tMax,          // tmax
+             0,             // ray time
+             255,           // mask
+             OPTIX_RAY_FLAG_NONE,
+             ShadowHitRecordIndex,  // sbt offset
+             0,                     // sbt stride
+             ShadowMissRecordIndex, // miss index
+             p0,
+             p1);
+
+  return !prd.hit;
+}
+
+__device__ __forceinline__ bool is_visible(const float3 &from,
+                                           const float3 &to) {
+  auto &scene = g_LaunchParams.scene;
+  auto wo = normalize(to - from);
+  auto dist = max(length(to - from) - scene.epsilon, scene.epsilon);
+  return is_visible(from, wo, dist);
+}
+
+__device__ __forceinline__ void trace_camera_ray(const Ray &ray, void *prd) {
+  const auto &scene = g_LaunchParams.scene;
+  unsigned int p0, p1;
+  unpack_ptr(prd, p0, p1);
+
+  optixTrace(scene.gas,
+             ray.origin,
+             ray.direction,
+             ray.min, // tmin
+             ray.max, // tmax
+             0,       // ray time
+             255,     // mask
+             OPTIX_RAY_FLAG_NONE,
+             MaterialHitRecordOffset, // sbt offset
+             1,                       // sbt stride
+             MaterialMissRecordIndex, // miss index
+             p0,
+             p1);
+}
+
+extern "C" __device__ void __raygen__path_tracing() {
   auto pixelIndex = current_pixel();
   RayPayload prd{};
   prd.seed = tea<4>(pixel_index(pixelIndex), 114514);
-
-  unsigned int p0, p1;
-  unpack_ptr(&prd, p0, p1);
 
   float3 pixelColorXYZ = make_float3(0.0f, 0.0f, 0.0f);
   auto spp = g_LaunchParams.spp;
@@ -304,19 +453,7 @@ extern "C" __device__ void __raygen__entry() {
 
     while (!prd.finish) {
       prd.length++;
-      optixTrace(scene.gas,
-                 prd.ray.origin,
-                 prd.ray.direction,
-                 prd.ray.min, // tmin
-                 prd.ray.max, // tmax
-                 0,           // ray time
-                 255,         // mask
-                 OPTIX_RAY_FLAG_NONE,
-                 0, // sbt offset
-                 1, // sbt stride
-                 0, // miss index
-                 p0,
-                 p1);
+      trace_camera_ray(prd.ray, &prd);
     }
     // CMIS
     auto invSumPdf =
@@ -334,9 +471,9 @@ extern "C" __device__ void __raygen__entry() {
   current_pixel_value() = xyz_to_srgb(pixelColorXYZ);
 }
 
-extern "C" __device__ void __miss__entry() {
+extern "C" __device__ void __miss__path_tracing() {
   auto data = (MissData *)optixGetSbtDataPointer();
-  auto prd = get_prd();
+  auto prd = get_prd<RayPayload>();
 
   // prd->L += prd->weight * eval_spectrum(data->colorCoeff, prd->waveLength);
   prd->finish = true;
@@ -345,33 +482,6 @@ extern "C" __device__ void __miss__entry() {
 extern "C" __device__ void __exception__entry() {
   auto data = (ExceptionData *)optixGetSbtDataPointer();
   current_pixel_value() = data->errorColor;
-}
-
-struct Geometry {
-  unsigned int primId;
-  float2 uv;
-  float3 v[3];
-  TangentSpace ts;
-};
-
-__device__ __forceinline__ Geometry get_geometry() {
-  Geometry geom;
-  // init geom
-  auto primId = optixGetPrimitiveIndex();
-  auto gas = optixGetGASTraversableHandle();
-  auto uv = optixGetTriangleBarycentrics();
-  optixGetTriangleVertexData(gas, primId, 0, 0, geom.v);
-  geom.primId = primId;
-  geom.uv = uv;
-  float3 *v = geom.v;
-
-  // calculate tangent space
-  TangentSpace &ts = geom.ts;
-  ts.origin = v[0] * (1 - uv.x - uv.y) + v[1] * uv.x + v[2] * uv.y;
-  ts.dpdu = v[1] - v[0];
-  ts.dpdv = v[2] - v[0];
-  ts.n = normalize(cross(ts.dpdu, ts.dpdv));
-  return geom;
 }
 
 __device__ __forceinline__ void russian_roulette(RayPayload *prd) {
@@ -386,7 +496,7 @@ __device__ __forceinline__ void russian_roulette(RayPayload *prd) {
 }
 
 extern "C" __device__ void __closesthit__blackbody() {
-  auto prd = get_prd();
+  auto prd = get_prd<RayPayload>();
   auto data = (BlackBodyHitGroupData *)optixGetSbtDataPointer();
 
   prd->L += prd->weight *
@@ -405,10 +515,8 @@ extern "C" __device__ void __closesthit__blackbody() {
   prd->finish = true;
 }
 
-extern "C" __device__ void __anyhit__blackbody() {}
-
 extern "C" __device__ void __closesthit__diffuse() {
-  auto prd = get_prd();
+  auto prd = get_prd<RayPayload>();
   auto data = (DiffuseHitGroupData *)optixGetSbtDataPointer();
   auto geom = get_geometry();
   TangentSpace &ts = geom.ts;
@@ -436,8 +544,6 @@ extern "C" __device__ void __closesthit__diffuse() {
   prd->pdf *= pdf;
 }
 
-extern "C" __device__ void __anyhit__diffuse() {}
-
 __device__ __forceinline__ float
 fresnel_parrallel(float cosI, float cosT, float nT) {
   auto r = (nT * cosI - cosT) / (nT * cosI + cosT);
@@ -456,7 +562,7 @@ __device__ __forceinline__ float fresnel(float cosI, float cosT, float nT) {
 }
 
 extern "C" __device__ void __closesthit__glass() {
-  auto prd = get_prd();
+  auto prd = get_prd<RayPayload>();
   auto data = (GlassHitGroupData *)optixGetSbtDataPointer();
   auto geom = get_geometry();
   TangentSpace &ts = geom.ts;
@@ -511,4 +617,36 @@ extern "C" __device__ void __closesthit__glass() {
   }
 }
 
-extern "C" __device__ void __anyhit__glass() {}
+extern "C" __device__ void __raygen__ao() {
+  auto &scene = g_LaunchParams.scene;
+
+  float3 rayOrigin;
+  float3 rayDir;
+
+  sample_camera_ray_with_jitter(make_float2(0, 0), rayOrigin, rayDir);
+
+  auto intersect = query_geometry(rayOrigin, rayDir, scene.extent);
+  current_pixel_value() = intersect.geom.ts.origin;
+  // return;
+
+  float ao = 0;
+  if (intersect.hit) {
+    auto spp = g_LaunchParams.spp;
+    auto ts = intersect.geom.ts;
+    auto base = ts.get_otho_base();
+    base.y = faceforward(base.y, -rayDir, base.y);
+    for (int i = 0; i < spp; i++) {
+      auto sample = hammersley_sample(i, spp);
+      float3 localDir;
+      cosine_sample_hemisphere(sample.x, sample.y, localDir);
+
+      ao += is_visible(ts.origin + base.y * scene.epsilon,
+                       base.local_to_world_dir(localDir),
+                       10.0f)
+                ? 1.0f
+                : 0.0f;
+    }
+    ao /= (float)spp;
+  }
+  current_pixel_value() = make_float3(ao, ao, ao);
+}

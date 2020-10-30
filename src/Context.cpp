@@ -109,39 +109,31 @@ static void common_add_group(std::vector<PipelineBuilder::Group> &groups,
 }
 
 PipelineBuilder &PipelineBuilder::set_launch_params(const std::string &name) {
-  launchParams = name;
+  _launchParams = name;
   return *this;
 }
 
 PipelineBuilder &PipelineBuilder::add_raygen_group(const std::string &module,
                                                    const std::string &entry) {
-  common_add_group(raygenGroups, module, entry);
+  common_add_group(_raygenGroups, module, entry);
   return *this;
 }
 
 PipelineBuilder &
 PipelineBuilder::add_exception_group(const std::string &module,
                                      const std::string &entry) {
-  common_add_group(exceptionGroups, module, entry);
+  common_add_group(_exceptionGroups, module, entry);
   return *this;
 }
 
 PipelineBuilder &PipelineBuilder::add_miss_group(const std::string &module,
                                                  const std::string &entry) {
-  common_add_group(missGroups, module, entry);
+  common_add_group(_missGroups, module, entry);
   return *this;
 }
 
-PipelineBuilder &PipelineBuilder::add_hit_group(const std::string &moduleCH,
-                                                const std::string &entryCH,
-                                                const std::string &moduleAH,
-                                                const std::string &entryAH) {
-  HitGroup group;
-  group.closestHit.module = moduleCH;
-  group.closestHit.entry = entryCH;
-  group.anyHit.module = moduleAH;
-  group.anyHit.entry = entryAH;
-  hitGroups.emplace_back(std::move(group));
+PipelineBuilder &PipelineBuilder::add_hit_group(HitGroup group) {
+  _hitGroups.emplace_back(std::move(group));
   return *this;
 }
 
@@ -165,16 +157,20 @@ Pipeline PipelineBuilder::build() {
   pipelineCompileOptions.exceptionFlags =
       OPTIX_EXCEPTION_FLAG_DEBUG | OPTIX_EXCEPTION_FLAG_USER;
   pipelineCompileOptions.pipelineLaunchParamsVariableName =
-      launchParams.c_str();
+      _launchParams.c_str();
 
   // compile modules
   std::set<std::string> uniqueModules;
-  get_unique_modules(uniqueModules, raygenGroups);
-  get_unique_modules(uniqueModules, exceptionGroups);
-  get_unique_modules(uniqueModules, missGroups);
-  for (const auto &g : hitGroups) {
-    uniqueModules.insert(g.closestHit.module);
-    uniqueModules.insert(g.anyHit.module);
+  get_unique_modules(uniqueModules, _raygenGroups);
+  get_unique_modules(uniqueModules, _exceptionGroups);
+  get_unique_modules(uniqueModules, _missGroups);
+  for (const auto &g : _hitGroups) {
+    if (g.closestHit.has_value()) {
+      uniqueModules.insert(g.closestHit->module);
+    }
+    if (g.anyHit.has_value()) {
+      uniqueModules.insert(g.anyHit->module);
+    }
   }
 
   for (const auto &moduleName : uniqueModules) {
@@ -202,7 +198,7 @@ Pipeline PipelineBuilder::build() {
   // create groups
   {
     {
-      auto count = raygenGroups.size();
+      auto count = _raygenGroups.size();
       pipeline.raygenGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
@@ -210,7 +206,7 @@ Pipeline PipelineBuilder::build() {
       desc.resize(count);
       for (size_t i = 0; i < count; i++) {
         auto &raygenDesc = desc[i];
-        const auto &group = raygenGroups[i];
+        const auto &group = _raygenGroups[i];
         raygenDesc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
         raygenDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
         raygenDesc.raygen.module = pipeline.modules[group.module];
@@ -226,7 +222,7 @@ Pipeline PipelineBuilder::build() {
                                   &pipeline.raygenGroups()[0]), );
     }
     {
-      auto count = missGroups.size();
+      auto count = _missGroups.size();
       pipeline.missGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
@@ -234,7 +230,7 @@ Pipeline PipelineBuilder::build() {
       desc.resize(count);
       for (size_t i = 0; i < count; i++) {
         auto &missDesc = desc[i];
-        const auto &group = missGroups[i];
+        const auto &group = _missGroups[i];
         missDesc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
         missDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
         missDesc.miss.module = pipeline.modules[group.module];
@@ -250,7 +246,7 @@ Pipeline PipelineBuilder::build() {
                                   &pipeline.missGroups()[0]), );
     }
     {
-      auto count = exceptionGroups.size();
+      auto count = _exceptionGroups.size();
       pipeline.exceptionGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
@@ -258,7 +254,7 @@ Pipeline PipelineBuilder::build() {
       desc.resize(count);
       for (size_t i = 0; i < count; i++) {
         auto &exceptionDesc = desc[i];
-        const auto &group = exceptionGroups[i];
+        const auto &group = _exceptionGroups[i];
         exceptionDesc.kind = OPTIX_PROGRAM_GROUP_KIND_EXCEPTION;
         exceptionDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
         exceptionDesc.exception.module = pipeline.modules[group.module];
@@ -274,7 +270,7 @@ Pipeline PipelineBuilder::build() {
                                   &pipeline.exceptionGroups()[0]), );
     }
     {
-      auto count = hitGroups.size();
+      auto count = _hitGroups.size();
       pipeline.hitGroups().resize(count);
       std::vector<OptixProgramGroupOptions> options;
       options.resize(count);
@@ -282,14 +278,29 @@ Pipeline PipelineBuilder::build() {
       desc.resize(count);
       for (size_t i = 0; i < count; i++) {
         auto &hitDesc = desc[i];
-        const auto &group = hitGroups[i];
+        const auto &group = _hitGroups[i];
 
         hitDesc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
         hitDesc.flags = OPTIX_PROGRAM_GROUP_FLAGS_NONE;
-        hitDesc.hitgroup.moduleCH = pipeline.modules[group.closestHit.module];
-        hitDesc.hitgroup.entryFunctionNameCH = group.closestHit.entry.c_str();
-        hitDesc.hitgroup.moduleAH = pipeline.modules[group.anyHit.module];
-        hitDesc.hitgroup.entryFunctionNameAH = group.anyHit.entry.c_str();
+
+        if (group.closestHit.has_value()) {
+          hitDesc.hitgroup.moduleCH =
+              pipeline.modules[group.closestHit->module];
+          hitDesc.hitgroup.entryFunctionNameCH =
+              group.closestHit->entry.c_str();
+        } else {
+          hitDesc.hitgroup.moduleCH = 0;
+          hitDesc.hitgroup.entryFunctionNameCH = 0;
+        }
+
+        if (group.anyHit.has_value()) {
+          hitDesc.hitgroup.moduleAH = pipeline.modules[group.anyHit->module];
+          hitDesc.hitgroup.entryFunctionNameAH = group.anyHit->entry.c_str();
+        } else {
+          hitDesc.hitgroup.moduleAH = 0;
+          hitDesc.hitgroup.entryFunctionNameAH = 0;
+        }
+
         hitDesc.hitgroup.moduleIS = 0;
         hitDesc.hitgroup.entryFunctionNameIS = 0;
       }
@@ -308,8 +319,8 @@ Pipeline PipelineBuilder::build() {
       linkOptions.maxTraceDepth = 2;
       linkOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
       std::vector<OptixProgramGroup> groups;
-      groups.reserve(raygenGroups.size() + missGroups.size() +
-                     exceptionGroups.size() + hitGroups.size());
+      groups.reserve(_raygenGroups.size() + _missGroups.size() +
+                     _exceptionGroups.size() + _hitGroups.size());
       for (int i = 0; i < Pipeline::groupCnt; i++) {
         for (auto g : pipeline.groups[i]) {
           groups.push_back(g);
@@ -347,9 +358,10 @@ ShaderBindingTable ShaderBindingTableBuilder::build() {
     for (size_t ri = 0; ri < records[i].size(); ri++) {
       const auto &record = records[i][ri];
       void *buf_d = (void *)((char *)sbt.sbtBuffers_d[i] + ri * stride);
-      TOY_CUDA_CHECK_OR_THROW(
-          cudaMemcpy(
-              buf_d, record.record.get(), record.size, cudaMemcpyHostToDevice), );
+      TOY_CUDA_CHECK_OR_THROW(cudaMemcpy(buf_d,
+                                         record.record.get(),
+                                         record.size,
+                                         cudaMemcpyHostToDevice), );
     }
   }
 

@@ -1,3 +1,4 @@
+cmake_policy(SET CMP0104 OLD)
 enable_language(CUDA)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /utf-8")
 
@@ -73,7 +74,7 @@ add_library(toy_ptx OBJECT
   pipeline.cu
   )
 target_compile_options(toy_ptx PRIVATE 
-  --gpu-architecture=compute_30        # OptiX 4 supports only Kepler and newer. OptiX 6 only Maxwell and newer.
+  --gpu-architecture=compute_75        # OptiX 4 supports only Kepler and newer. OptiX 6 only Maxwell and newer.
   --use_fast_math                      # Generate fast approximations. Requires CUDA 8.0 or newer nvrtc to work!
   --relocatable-device-code=true       # Generate PTX code also for unreferenced functions. Needed since CUDA 8.0 to generate code for callable programs.
   --generate-line-info                 # Generate line information to allow better profiling with Nsight.
