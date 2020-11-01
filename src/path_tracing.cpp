@@ -60,9 +60,14 @@ void PathGlassMaterial::add_hit_record(
 ShaderBindingTableBuilder
 PathIntegrator::get_stb_builder(const std::shared_ptr<cpptoml::table> &toml) {
   ShaderBindingTableBuilder builder(&pipeline);
-  builder.add_raygen_record<dev::RayGenData>(0);
+
+  // raygen records, see pipeline.h *RaygenRecordIndex for order
+  builder.add_raygen_record_no_data(dev::PathTracingRaygenProgramGroupIndex);
+  builder.add_raygen_record_no_data(dev::AORaygenProgramGroupIndex);
+
   auto exceptionRecord = builder.add_exception_record<dev::ExceptionData>(0);
   exceptionRecord->errorColor = make_float3(0, 1.0f, 0);
+
   // miss records, see pipeline.h *MissRecordIndex for order
   builder.add_miss_record_no_data(dev::ShadowMissProgramGroupIndex);
   builder.add_miss_record_no_data(dev::GeometryQueryMissProgramGroupIndex);
@@ -122,14 +127,16 @@ std::unique_ptr<IIntegrator> PathIntegratorBuilder::build() {
 
   auto builder = PipelineBuilder()
                      .set_launch_params("g_LaunchParams")
-                     //.add_raygen_group(moduleName, "__raygen__path_tracing")
-                     .add_raygen_group(moduleName, "__raygen__ao")
                      .add_exception_group(moduleName, "__exception__entry");
 
+  // raygen groups, order is important
+  builder.add_raygen_group(moduleName, "__raygen__path_tracing")
+      .add_raygen_group(moduleName, "__raygen__ao");
+
   // miss groups, order is important
-  builder.add_miss_group(moduleName, "__miss__shadow");
-  builder.add_miss_group(moduleName, "__miss__geometry_query");
-  builder.add_miss_group(moduleName, "__miss__path_tracing");
+  builder.add_miss_group(moduleName, "__miss__shadow")
+      .add_miss_group(moduleName, "__miss__geometry_query")
+      .add_miss_group(moduleName, "__miss__path_tracing");
 
   // add materials
   for (unsigned int i = 0; i < hitGroups.size(); i++) {

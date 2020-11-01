@@ -123,9 +123,19 @@ template <typename T> struct alignas(OPTIX_SBT_RECORD_ALIGNMENT) Record {
 struct ShaderBindingTable {
   // device memory buffers
   void *sbtBuffers_d[Pipeline::groupCnt]{};
+  // size in bytes
   size_t sbtBufferSizes[Pipeline::groupCnt]{};
+  // stride in bytes
   size_t sbtBufferStrides[Pipeline::groupCnt]{};
   OptixShaderBindingTable sbt{};
+
+  CUdeviceptr calculate_buffer_offset(unsigned int group, unsigned int index);
+
+  // use the first raygen record by default
+  ShaderBindingTable &set_raygen_record(unsigned int index);
+
+  // use the first exception record by default
+  ShaderBindingTable &set_exception_record(unsigned int index);
 
   void destroy();
 };
@@ -168,6 +178,7 @@ struct ShaderBindingTableBuilder {
     ~RecordHandle() = default;
 
     std::unique_ptr<void, GenericDeleter> record;
+    // size in bytes
     size_t size;
   };
 

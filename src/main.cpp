@@ -107,6 +107,9 @@ int run(int argc, const char **argv) {
       std::cout << "render start at " << std::ctime(&t) << std::flush;
     }
     {
+      // TODO set raygen record based on config file
+      scene.sbt.set_raygen_record(dev::AORaygenRecordIndex);
+
       TOY_CUDA_CHECK_OR_THROW(
           cudaMalloc(&launchParams_d.ptr,
                      sizeof(dev::LaunchParams) * numStreams), );

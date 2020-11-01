@@ -3,6 +3,11 @@
 #include <optix.h>
 
 namespace dev {
+static constexpr unsigned int PathTracingRaygenProgramGroupIndex = 0;
+static constexpr unsigned int AORaygenProgramGroupIndex = 1;
+
+static constexpr unsigned int PathTracingRaygenRecordIndex = 0;
+static constexpr unsigned int AORaygenRecordIndex = 1;
 
 static constexpr unsigned int ShadowHitProgramGroupIndex = 0;
 static constexpr unsigned int GeometryQueryHitProgramGroupIndex = 1;
@@ -103,9 +108,6 @@ struct LaunchParams {
   int spp;
   int maxPathLength;
 };
-
-struct RayGenData {};
-
 struct ExceptionData {
   float3 errorColor;
 };

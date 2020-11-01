@@ -551,6 +551,32 @@ void Pipeline::destroy() {
   optixPipelineDestroy(pipeline);
 }
 
+CUdeviceptr ShaderBindingTable::calculate_buffer_offset(unsigned int group,
+                                                        unsigned int index) {
+
+  auto stride = sbtBufferStrides[group];
+  auto size = sbtBufferSizes[group];
+  auto buf_d = sbtBuffers_d[group];
+  if (index * stride >= size) {
+    throw std::runtime_error("index out of bound");
+  }
+  return (CUdeviceptr)((uint8_t *)buf_d + index * stride);
+}
+
+// use the first raygen record by default
+ShaderBindingTable &ShaderBindingTable::set_raygen_record(unsigned int index) {
+  sbt.raygenRecord = calculate_buffer_offset(Pipeline::raygenGroupIndex, index);
+  return *this;
+}
+
+// use the first exception record by default
+ShaderBindingTable &
+ShaderBindingTable::set_exception_record(unsigned int index) {
+  sbt.exceptionRecord =
+      calculate_buffer_offset(Pipeline::exceptionGroupIndex, index);
+  return *this;
+}
+
 void ShaderBindingTable::destroy() {
   for (auto buf : sbtBuffers_d) {
     cudaFree(buf);
