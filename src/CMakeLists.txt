@@ -71,6 +71,7 @@ target_link_libraries(toy_exe PRIVATE
 # runtime loadable ptx 
 #######################################
 add_library(toy_ptx OBJECT 
+  pipeline.h
   pipeline.cu
   )
 target_compile_options(toy_ptx PRIVATE 

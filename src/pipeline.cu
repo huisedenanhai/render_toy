@@ -296,6 +296,17 @@ struct Ray {
   float min;
   float3 direction;
   float max;
+
+  __device__ __forceinline__ void init_with_offset(const float3 &origin,
+                                                   const float3 &dir,
+                                                   const float3 &normal,
+                                                   float epsilon,
+                                                   float extent) {
+    this->origin = origin + faceforward(normal, dir, normal) * epsilon;
+    this->direction = dir;
+    this->min = epsilon;
+    this->max = extent;
+  }
 };
 
 struct RayPayload {
@@ -529,10 +540,8 @@ extern "C" __device__ void __closesthit__diffuse() {
   auto nextDir = base.local_to_world_dir(d);
   // init next ray
   auto &scene = g_LaunchParams.scene;
-  prd->ray.origin = ts.origin + base.y * scene.epsilon;
-  prd->ray.direction = nextDir;
-  prd->ray.min = scene.epsilon;
-  prd->ray.max = scene.extent;
+  prd->ray.init_with_offset(
+      ts.origin, nextDir, base.y, scene.epsilon, scene.extent);
   // attenuate factor, some terms are cancelled out as
   // hemisphere are cosine sampled
   prd->weight *= eval_spectrum(data->baseColorCoeff, prd->waveLength);
@@ -554,6 +563,100 @@ fresnel_perpendicular(float cosI, float cosT, float nT) {
 __device__ __forceinline__ float fresnel(float cosI, float cosT, float nT) {
   return 0.5f * (fresnel_parrallel(cosI, cosT, nT) +
                  fresnel_perpendicular(cosI, cosT, nT));
+}
+
+// bad, don't use
+__device__ __forceinline__ float interference_factor_auto_normalize(
+    float phi, float waveLength, float stride, float sinThetaI) {
+  float a = 2.0f * Pi * stride / waveLength;
+  float b = sinThetaI;
+  float c = 0.5f * (a - a * b);
+  float sinC = sinf(c);
+  float cotC = cosf(c) / sinC;
+  float w = -a * cotC + 2.0f * logf(sinf(a * b * 0.5)) - 2.0f * logf(-sinC);
+  w = w / (a * a);
+  float norm = 1.0f / (Pi * w);
+  float factor = norm / (2.0f - 2.0f * cosf(phi));
+  return isnan(factor) ? 0.0f : factor;
+}
+
+// bad, don't use
+__device__ __forceinline__ float4
+interference_factor_auto_normalize(const float4 &phi,
+                                   const float4 &waveLength,
+                                   float stride,
+                                   float sinThetaI) {
+  return make_float4(interference_factor_auto_normalize(
+                         phi.x, waveLength.x, stride, sinThetaI),
+                     interference_factor_auto_normalize(
+                         phi.y, waveLength.y, stride, sinThetaI),
+                     interference_factor_auto_normalize(
+                         phi.z, waveLength.z, stride, sinThetaI),
+                     interference_factor_auto_normalize(
+                         phi.w, waveLength.w, stride, sinThetaI));
+}
+
+__device__ __forceinline__ float interference_factor(const float &phi) {
+  float r = 0.9f;
+  return (1.0f - r) * (1.0f - r) / (1.0f - 2.0f * r * cosf(phi) + r * r);
+}
+
+__device__ __forceinline__ float4 interference_factor(const float4 &phi) {
+  return make_float4(interference_factor(phi.x),
+                     interference_factor(phi.y),
+                     interference_factor(phi.z),
+                     interference_factor(phi.w));
+}
+
+extern "C" __device__ void __closesthit__iso_interference() {
+  auto prd = get_prd<RayPayload>();
+  auto data = (IsoInterferenceHitGroupData *)optixGetSbtDataPointer();
+  auto geom = get_geometry();
+  TangentSpace &ts = geom.ts;
+
+  russian_roulette(prd);
+
+  auto base = ts.get_otho_base();
+  float3 wi = base.world_to_local_dir(-prd->ray.direction);
+  float3 wo;
+  auto pdf = cosine_sample_hemisphere(prd->seed, wo);
+
+  float sinThetaO = sqrtf(max(0.0f, 1.0f - wo.y * wo.y));
+  float sinThetaI = sqrtf(max(0.0f, 1.0f - wi.y * wi.y));
+
+  float deltaS = data->stride * (sinThetaO - sinThetaI);
+  float4 deltaPhi =
+      2.0f * Pi * make_float4(deltaS, deltaS, deltaS, deltaS) / prd->waveLength;
+  float4 interference = interference_factor(deltaPhi) * data->strength;
+
+  auto nextDir = base.local_to_world_dir(wo);
+  // init next ray
+  auto &scene = g_LaunchParams.scene;
+  prd->ray.init_with_offset(
+      ts.origin, nextDir, ts.n, scene.epsilon, scene.extent);
+  prd->weight *=
+      eval_spectrum(data->baseColorCoeff, prd->waveLength) * interference;
+  prd->pdf *= pdf;
+}
+
+extern "C" __device__ void __closesthit__mirror() {
+  auto prd = get_prd<RayPayload>();
+  auto data = (MirrorHitGroupData *)optixGetSbtDataPointer();
+  auto geom = get_geometry();
+  TangentSpace &ts = geom.ts;
+
+  russian_roulette(prd);
+
+  auto base = ts.get_otho_base();
+  float3 wi = base.world_to_local_dir(-prd->ray.direction);
+  auto reflectDirLocal = make_float3(-wi.x, wi.y, -wi.z);
+  auto nextDir = base.local_to_world_dir(reflectDirLocal);
+  // init next ray
+  auto &scene = g_LaunchParams.scene;
+  prd->ray.init_with_offset(
+      ts.origin, nextDir, ts.n, scene.epsilon, scene.extent);
+  prd->weight *= eval_spectrum(data->baseColorCoeff, prd->waveLength);
+  // pdf unchanged
 }
 
 extern "C" __device__ void __closesthit__glass() {
@@ -592,11 +695,8 @@ extern "C" __device__ void __closesthit__glass() {
   auto nextDir = base.local_to_world_dir(nextDirLocal);
   // init next ray
   auto &scene = g_LaunchParams.scene;
-  prd->ray.origin =
-      ts.origin + faceforward(ts.n, nextDir, ts.n) * scene.epsilon;
-  prd->ray.direction = nextDir;
-  prd->ray.min = scene.epsilon;
-  prd->ray.max = scene.extent;
+  prd->ray.init_with_offset(
+      ts.origin, nextDir, ts.n, scene.epsilon, scene.extent);
   if (data->cauchy != 0) {
     // other wavelength has no contribution when dispersion happens
     prd->weight *=

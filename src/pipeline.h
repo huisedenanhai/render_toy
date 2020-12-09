@@ -108,6 +108,7 @@ struct LaunchParams {
   int spp;
   int maxPathLength;
 };
+
 struct ExceptionData {
   float3 errorColor;
 };
@@ -119,6 +120,16 @@ struct MissData {
 struct DiffuseHitGroupData {
   float3 baseColorCoeff;
   float3 emissionCoeff;
+};
+
+struct MirrorHitGroupData {
+  float3 baseColorCoeff;
+};
+
+struct IsoInterferenceHitGroupData {
+  float3 baseColorCoeff;
+  float stride;
+  float strength;
 };
 
 struct GlassHitGroupData {

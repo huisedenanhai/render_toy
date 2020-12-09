@@ -1,6 +1,7 @@
 #include "path_tracing.h"
 #include "pipeline.h"
 #include "scene.h"
+#include "vec_math.h"
 #include <optional>
 
 inline float3 get_color(const std::shared_ptr<cpptoml::table> &data,
@@ -55,6 +56,28 @@ void PathGlassMaterial::add_hit_record(
   record->cauchy = data->get_as<double>("cauchy").value_or(0.0);
   record->baseColorCoeff =
       get_color_coeff(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
+}
+
+void PathMirrorMaterial::add_hit_record(
+    ShaderBindingTableBuilder &builder,
+    unsigned int index,
+    const std::shared_ptr<cpptoml::table> &data) {
+  auto record = builder.add_hit_record<dev::MirrorHitGroupData>(index);
+  record->baseColorCoeff =
+      get_color_coeff(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
+}
+
+void PathIsoInterferenceMaterial::add_hit_record(
+    ShaderBindingTableBuilder &builder,
+    unsigned int index,
+    const std::shared_ptr<cpptoml::table> &data) {
+  auto record = builder.add_hit_record<dev::IsoInterferenceHitGroupData>(index);
+  record->baseColorCoeff =
+      get_color_coeff(data, "baseColor", make_float3(0.7f, 0.7f, 0.7f));
+  float stride = record->stride =
+      abs(data->get_as<double>("stride").value_or(200.0));
+  record->strength =
+      abs(static_cast<float>(data->get_as<double>("strength").value_or(1.0)));
 }
 
 ShaderBindingTableBuilder
@@ -120,6 +143,14 @@ std::unique_ptr<IIntegrator> PathIntegratorBuilder::build() {
                          "__closesthit__glass",
                          std::nullopt,
                          std::make_unique<PathGlassMaterial>());
+  hitGroups.emplace_back("mirror",
+                         "__closesthit__mirror",
+                         std::nullopt,
+                         std::make_unique<PathMirrorMaterial>());
+  hitGroups.emplace_back("iso_interference",
+                         "__closesthit__iso_interference",
+                         std::nullopt,
+                         std::make_unique<PathIsoInterferenceMaterial>());
   hitGroups.emplace_back("blackbody",
                          "__closesthit__blackbody",
                          std::nullopt,

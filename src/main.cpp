@@ -108,7 +108,8 @@ int run(int argc, const char **argv) {
     }
     {
       // TODO set raygen record based on config file
-      scene.sbt.set_raygen_record(dev::AORaygenRecordIndex);
+      // scene.sbt.set_raygen_record(dev::AORaygenRecordIndex);
+      scene.sbt.set_raygen_record(dev::PathTracingRaygenRecordIndex);
 
       TOY_CUDA_CHECK_OR_THROW(
           cudaMalloc(&launchParams_d.ptr,
