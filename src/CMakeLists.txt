@@ -49,6 +49,8 @@ add_executable(toy_exe
   exceptions.h
   spectral_upsampling.h
   spectral_upsampling.cpp
+  texture.h
+  texture.cpp
   )
 target_compile_features(toy_exe PRIVATE
   cxx_std_17
