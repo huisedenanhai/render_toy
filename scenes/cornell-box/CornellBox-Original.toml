@@ -25,9 +25,11 @@ emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
 id = "shortBox.618c5df8-e207-e3e1-f666-449683a17af1"
-type = "iso_interference"
+# type = "iso_interference"
+type = "glass"
 baseColor = [0.725000, 0.710000, 0.680000]
-stride = 200
+# stride = 200
+ior = 1.5
 # emission = [0.000000, 0.000000, 0.000000]
 
 [[material]]
