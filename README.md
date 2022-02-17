@@ -28,4 +28,4 @@ Run
 toy_exe <the_scene.toml>
 ```
 
-There is a tool `obj2ma` for importing `.obj` file as `.ma` file that can be read by this renderer.
+There is a tool `obj2ma` for importing `.obj` file as `.ma` file which can be read by this renderer.

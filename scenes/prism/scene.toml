@@ -6,8 +6,7 @@ maxPathLength = 30
 width = 800
 height = 500
 resolution = 1000
-#hdr = true
-hdr = false
+hdr = true
 exposure = 1.0
 denoise = true
 
